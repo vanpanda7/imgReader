@@ -1176,6 +1176,11 @@
         let totalPages = 1; // 总页数
         let currentComicDir = localStorage.getItem('selectedComicDir') || 'JM'; // 当前选择的漫画目录（从 localStorage 读取或默认 JM）
 
+        // ==================== 全局变量新增 ====================
+        // 用于取消正在进行的网络请求
+        let currentImageListController = null; // 控制图片列表请求
+        let currentFolderListController = null; // 控制文件夹列表请求
+
         // ==================== 本地进度管理器 ====================
         const ProgressMgr = {
             save: (path, pageIndex, total) => {
@@ -1454,58 +1459,58 @@
             loadFolders(currentFolderPath || '', 1);
         }
         
-        // 加载文件夹列表
+        // 加载文件夹列表 (已修复串台问题)
         async function loadFolders(path = '', page = 1, cacheBuster = null, append = false) {
-            // 如果正在加载，且不是追加模式，直接返回
-            if (isLoadingFolders && !append) {
-                return;
-            }
+            if (isLoadingFolders && !append) return;
+            if (append && (hasReachedEnd || page > totalPages)) return;
             
-            // 如果是追加模式，且已经到底了，坚决不加载
-            if (append && (hasReachedEnd || page > totalPages)) {
-                return; 
+            // 如果不是追加模式（即切换目录），取消之前的目录请求
+            if (!append) {
+                if (currentFolderListController) {
+                    currentFolderListController.abort();
+                }
+                currentFolderListController = new AbortController();
             }
+
+            const folderList = document.getElementById('folderList');
             
-            // 如果是追加模式，显示加载提示
+            // UI 处理代码
             if (append) {
-                if (isLoadingFolders) return; // 防止重复追加
+                if (isLoadingFolders) return;
                 isLoadingFolders = true;
-                const folderList = document.getElementById('folderList');
                 const loadingDiv = document.createElement('div');
                 loadingDiv.className = 'loading';
                 loadingDiv.id = 'loadingMore';
                 loadingDiv.textContent = '加载中...';
                 folderList.appendChild(loadingDiv);
             } else {
-                const folderList = document.getElementById('folderList');
                 folderList.innerHTML = '<div class="loading">加载中...</div>';
+                isLoadingFolders = true;
             }
             
-            isLoadingFolders = true;
-            
             try {
-                // 解析排序参数
                 const [sortBy, order] = currentSort.split('-');
-                // 所有目录都使用分页
                 const pageParam = `&page=${page}&page_size=${pageSize}`;
-                // 添加强制刷新参数（绕过缓存）
                 const cacheParam = cacheBuster ? `&_t=${cacheBuster}` : '';
                 const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
                 const url = path ? 
                     `${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(path)}&sort_by=${sortBy}&order=${order}${pageParam}${comicDirParam}${cacheParam}` : 
                     `${CONFIG.API_BASE_URL}/api/files?sort_by=${sortBy}&order=${order}${pageParam}${comicDirParam}${cacheParam}`;
                 
-                // 使用 no-cache 选项强制获取最新数据
-                const fetchOptions = cacheBuster ? {
-                    cache: 'no-cache',
-                    headers: {
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache'
-                    }
-                } : {};
+                const fetchOptions = {
+                    signal: currentFolderListController ? currentFolderListController.signal : null, // ★ 绑定信号
+                    ...(cacheBuster ? { cache: 'no-cache', headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' } } : {})
+                };
                 
                 const response = await fetch(url, fetchOptions);
                 const data = await response.json();
+                
+                // ★★★ 双重保险：检查 currentFolderPath
+                // 注意：这里比较 tricky，因为 path 参数可能是空字符串（根目录），而 currentFolderPath 也是空字符串
+                // 如果是追加模式，不需要严格检查，因为追加一定是针对当前目录的
+                if (!append && path !== currentFolderPath) {
+                     return;
+                }
                 
                 // 调试：输出API响应
                 if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
@@ -1819,6 +1824,10 @@
                     updateFolderBreadcrumb(path);
                 }
             } catch (error) {
+                if (error.name === 'AbortError') {
+                    // console.log('目录加载已取消');
+                    return; // 静默退出
+                }
                 consecutiveFailures++;
                 const folderList = document.getElementById('folderList');
                 if (!append) {
@@ -2588,61 +2597,75 @@
         }
 
         // 加载文件夹中的图片
+        // 加载文件夹中的图片 (已修复串台问题)
         async function loadFolderImages(folderPath, cacheBuster = null) {
+            // 1. 如果有正在进行的请求，直接掐断！
+            if (currentImageListController) {
+                currentImageListController.abort();
+            }
+            currentImageListController = new AbortController();
+
+            // 更新当前状态
             currentFolderPath = folderPath;
             currentImages = [];
             currentIndex = -1;
             
             const imageList = document.getElementById('imageList');
             const imageListTitle = document.getElementById('imageListTitle');
-            
-            // 先隐藏图片列表和标题
-            imageList.classList.remove('has-images');
-            imageListTitle.style.display = 'none';
-            imageList.innerHTML = '';
+            const imageWrapper = document.getElementById('imageWrapper');
+            const loadingText = document.getElementById('loadingText');
+
+            // 立即清空界面，防止残留
+            if (imageList) {
+                imageList.classList.remove('has-images');
+                imageListTitle.style.display = 'none';
+                imageList.innerHTML = '';
+            }
+            // 清空阅读器
+            clearImageViewer();
+            if (loadingText) {
+                loadingText.textContent = '加载中...';
+                loadingText.style.display = 'block';
+            }
             
             try {
-                // 添加强制刷新参数（绕过缓存）
                 const cacheParam = cacheBuster ? `&_t=${cacheBuster}` : '';
                 const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
-                // 看漫画时，默认按文件名升序排序
-                // 显式增加 &page=1&page_size=5000，确保加载完本话所有图片
+                // 强制获取大量图片，确保一次拿完
                 const url = `${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(folderPath)}&sort_by=name&order=asc&page=1&page_size=5000${comicDirParam}${cacheParam}`;
                 
-                // 使用 no-cache 选项强制获取最新数据
                 const fetchOptions = cacheBuster ? {
                     cache: 'no-cache',
-                    headers: {
-                        'Cache-Control': 'no-cache',
-                        'Pragma': 'no-cache'
-                    }
-                } : {};
+                    headers: { 'Cache-Control': 'no-cache', 'Pragma': 'no-cache' },
+                    signal: currentImageListController.signal // ★ 绑定信号
+                } : {
+                    signal: currentImageListController.signal // ★ 绑定信号
+                };
                 
                 const response = await fetch(url, fetchOptions);
                 const data = await response.json();
                 
+                // ★★★ 双重保险：数据回来后，检查当前文件夹是否还是当初请求的那个
+                if (currentFolderPath !== folderPath) {
+                    console.warn('检测到文件夹已切换，丢弃旧数据:', folderPath);
+                    return; 
+                }
+                
                 if (data.success && data.items) {
-                    // 过滤出图片文件（后端已按文件名排序，这里只需要过滤）
-                    currentImages = data.items
-                        .filter(item => {
-                            // 跳过目录
-                            if (item.type === 'directory') return false;
-                            // 提取文件扩展名
-                            const lastDotIndex = item.name.lastIndexOf('.');
-                            if (lastDotIndex === -1 || lastDotIndex === item.name.length - 1) {
-                                return false;
-                            }
-                            const ext = item.name.toLowerCase().substring(lastDotIndex);
-                            return CONFIG.IMAGE_EXTENSIONS.includes(ext);
-                        });
+                    // 过滤逻辑
+                    currentImages = data.items.filter(item => {
+                        if (item.type === 'directory') return false;
+                        const lastDotIndex = item.name.lastIndexOf('.');
+                        if (lastDotIndex === -1) return false;
+                        const ext = item.name.toLowerCase().substring(lastDotIndex);
+                        return CONFIG.IMAGE_EXTENSIONS.includes(ext);
+                    });
                     
                     if (currentImages.length > 0 && folderPath) {
-                        // 只在有图片且不是根目录时渲染
                         renderImageList();
                         renderAllImages();
                         currentIndex = 0;
                         showImage(0);
-                        // ★★★ 核心：有图片，移动端自动切到阅读器 ★★★
                         enterMobileReader();
                         
                         // ★★★ 新增：恢复进度 ★★★
@@ -2656,16 +2679,26 @@
                             }, 100);
                         }
                     } else {
-                        // 没有图片时，完全隐藏，不显示任何内容
+                        // 没有图片
                         clearImageViewer();
-                        // 没图片，留在列表页
+                        if (loadingText) loadingText.textContent = '此文件夹没有图片';
                         exitMobileReader();
                     }
                 }
             } catch (error) {
-                // 加载失败时也隐藏
-                console.error('加载图片失败:', error);
-                clearImageViewer();
+                // 如果是手动取消的，不报错
+                if (error.name === 'AbortError') {
+                    console.log('上一个图片列表请求已自动取消');
+                } else {
+                    console.error('加载图片失败:', error);
+                    clearImageViewer();
+                    if (loadingText) loadingText.textContent = '加载失败，请重试';
+                }
+            } finally {
+                // 请求结束，释放控制器（如果是当前这个请求的话）
+                if (currentImageListController && currentImageListController.signal.aborted) {
+                    currentImageListController = null;
+                }
             }
         }
 
