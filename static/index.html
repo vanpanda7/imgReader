@@ -1,0 +1,909 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JMComic 下载工具</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 25px;
+            max-width: 600px;
+            width: 100%;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 10px;
+                align-items: flex-start;
+            }
+
+            .container {
+                padding: 20px;
+                border-radius: 15px;
+            }
+
+            h1 {
+                font-size: 22px;
+                margin-bottom: 8px;
+            }
+
+            .subtitle {
+                font-size: 12px;
+                margin-bottom: 15px;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
+
+            .input-group {
+                margin-bottom: 15px;
+            }
+        }
+
+        .download-section {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 6px;
+            text-align: center;
+            font-size: 22px;
+        }
+
+        .subtitle {
+            color: #666;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 12px;
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            color: #333;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        input[type="text"] {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+            outline: none;
+        }
+
+        input[type="text"]:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            outline: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #333;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .status.show {
+            display: block;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.loading {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .status-message {
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .status-details {
+            font-size: 14px;
+            margin-top: 10px;
+        }
+
+        /* 进度条样式 */
+        .progress-container {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .progress-container.show {
+            display: block;
+        }
+
+        .progress-bar-wrapper {
+            width: 100%;
+            height: 24px;
+            background: #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 11px;
+            font-weight: 600;
+            min-width: 0;
+        }
+
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: #666;
+        }
+
+        .progress-text {
+            font-weight: 500;
+        }
+
+        .progress-percentage {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+            vertical-align: middle;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 发布页信息区域 */
+        .publish-info {
+            margin-top: 20px;
+            border-top: 1px solid #e0e0e0;
+            padding-top: 15px;
+        }
+
+        .publish-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+            padding: 8px;
+            border-radius: 8px;
+            transition: background 0.2s;
+        }
+
+        .publish-header:hover {
+            background: #f5f5f5;
+        }
+
+        .publish-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .publish-toggle {
+            font-size: 20px;
+            color: #667eea;
+            transition: transform 0.3s;
+        }
+
+        .publish-toggle.expanded {
+            transform: rotate(180deg);
+        }
+
+        .publish-content {
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease-out;
+        }
+
+        .publish-content.show {
+            max-height: 2000px;
+            transition: max-height 0.5s ease-in;
+        }
+
+        .publish-section {
+            margin-top: 12px;
+            padding: 12px;
+            background: #f9f9f9;
+            border-radius: 8px;
+        }
+
+        .publish-section-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 8px;
+        }
+
+        .domain-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 10px;
+            margin: 5px 0;
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            color: inherit;
+        }
+
+        .domain-item:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+            transform: translateX(4px);
+        }
+
+        .domain-text {
+            flex: 1;
+            font-size: 13px;
+            color: #333;
+            word-break: break-all;
+        }
+
+        .domain-label {
+            font-size: 11px;
+            color: #999;
+            margin-right: 6px;
+            white-space: nowrap;
+        }
+
+        @media (max-width: 768px) {
+            .domain-item {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 8px;
+            }
+
+            .copy-btn {
+                width: 100%;
+                margin-left: 0;
+            }
+
+            .publish-section {
+                padding: 12px;
+            }
+        }
+
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="download-section">
+            <h1>📚 JMComic</h1>
+            <div class="input-group">
+                <label for="albumId">JM车牌号:</label>
+                <input 
+                    type="text" 
+                    id="albumId" 
+                    placeholder="禁漫车牌，例如: JM1244464、1244464"
+                    autocomplete="off"
+                >
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" id="downloadBtn" onclick="startDownload()">
+                    开始下载
+                </button>
+                <button class="btn-secondary" onclick="clearStatus()">
+                    清空
+                </button>
+            </div>
+            
+            <div style="margin-top: 12px; text-align: center;">
+                <a href="viewer.html" target="_blank" style="color: #667eea; text-decoration: none; font-size: 13px;">
+                    📖 准备起飞
+                </a>
+            </div>
+
+            <!-- 禁漫天堂发布页信息 -->
+            <div class="publish-info">
+                <div class="publish-header" onclick="togglePublishInfo()">
+                    <div class="publish-title">
+                        <span>🏠</span>
+                        <span>禁漫天堂回家的路</span>
+                    </div>
+                    <span class="publish-toggle" id="publishToggle">▼</span>
+                </div>
+                <div class="publish-content" id="publishContent">
+                    <div class="publish-section">
+                        <div class="publish-section-title">國際通用網域（不支援日本/韓國路線）</div>
+                        <a href="https://18comic.vip" target="_blank" class="domain-item">
+                            <span class="domain-text">18comic.vip</span>
+                        </a>
+                        <a href="https://18comic.ink" target="_blank" class="domain-item">
+                            <span class="domain-text">18comic.ink</span>
+                        </a>
+                    </div>
+                    <div class="publish-section">
+                        <div class="publish-section-title">內地網域</div>
+                        <a href="https://jm18c-jjd.club" target="_blank" class="domain-item">
+                            <span class="domain-label">分流1</span>
+                            <span class="domain-text">https://jm18c-jjd.club</span>
+                        </a>
+                        <a href="https://jm18c-uoi.net" target="_blank" class="domain-item">
+                            <span class="domain-label">分流2</span>
+                            <span class="domain-text">https://jm18c-uoi.net</span>
+                        </a>
+                        <a href="https://jm18c-jjd.net" target="_blank" class="domain-item">
+                            <span class="domain-label">分流3</span>
+                            <span class="domain-text">https://jm18c-jjd.net</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            <div id="status" class="status"></div>
+            
+            <!-- 进度条 -->
+            <div class="progress-container" id="progressContainer">
+                <div class="progress-bar-wrapper">
+                    <div class="progress-bar" id="progressBar" style="width: 0%">
+                        <span id="progressBarText">0%</span>
+                    </div>
+                </div>
+                <div class="progress-info">
+                    <span class="progress-text" id="progressText">准备开始...</span>
+                    <span class="progress-percentage" id="progressPercentage">0%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置区域 ====================
+        const CONFIG = {
+            // 后端API地址配置
+            API_BASE_URL: (() => {
+                // 优先从URL参数获取
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('api')) {
+                    return urlParams.get('api');
+                }
+                // 从环境变量或localStorage获取
+                if (window.API_BASE_URL) {
+                    return window.API_BASE_URL;
+                }
+                const savedApi = localStorage.getItem('api_base_url');
+                if (savedApi) {
+                    return savedApi;
+                }
+                // 默认使用当前页面的协议和主机名，端口8000
+                // 如果前端通过域名访问，API也使用相同域名，但端口8000
+                const protocol = window.location.protocol;
+                const hostname = window.location.hostname;
+                // 如果是 localhost 或 127.0.0.1，直接使用 localhost:8000
+                if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                    return 'http://localhost:8000';
+                }
+                // 否则使用当前主机名，但端口8000（假设后端在同一服务器）
+                return `${protocol}//${hostname}:8000`;
+            })(),
+            // 进度轮询间隔（毫秒）
+            PROGRESS_POLL_INTERVAL: 1000,
+            // 进度条隐藏延迟（毫秒）
+            PROGRESS_HIDE_DELAY: 3000
+        };
+        
+        // 保存API地址到localStorage（如果通过URL参数设置）
+        if (new URLSearchParams(window.location.search).get('api')) {
+            localStorage.setItem('api_base_url', CONFIG.API_BASE_URL);
+        }
+        
+        // ==================== DOM元素 ====================
+        const albumIdInput = document.getElementById('albumId');
+        const downloadBtn = document.getElementById('downloadBtn');
+        const statusDiv = document.getElementById('status');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressBarText = document.getElementById('progressBarText');
+        const progressText = document.getElementById('progressText');
+        const progressPercentage = document.getElementById('progressPercentage');
+        
+        // ==================== 状态变量 ====================
+        let progressInterval = null; // 保留用于兼容性（如果 WebSocket 失败）
+        let currentAlbumId = null;
+        let progressWebSocket = null; // WebSocket 连接
+
+        // 输入时自动去除JM前缀（实时处理）
+        albumIdInput.addEventListener('blur', function() {
+            let value = this.value.trim();
+            if (/^JM/i.test(value)) {
+                this.value = value.replace(/^JM/i, '');
+            }
+        });
+
+        // 回车键触发下载
+        albumIdInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                startDownload();
+            }
+        });
+
+        // ==================== API调用函数 ====================
+        /**
+         * 查询下载进度（保留用于兼容性，如果 WebSocket 失败时使用）
+         */
+        async function checkProgress(albumId) {
+            try {
+                const response = await fetch(`${CONFIG.API_BASE_URL}/api/progress/${albumId}`);
+                const data = await response.json();
+                
+                if (data.success && data.progress) {
+                    const progress = data.progress;
+                    updateProgressBar(progress);
+                    
+                    // 如果下载完成或失败，停止轮询
+                    if (progress.status === 'completed' || progress.status === 'error') {
+                        stopProgressPolling();
+                        if (progress.status === 'completed') {
+                            // 获取相册名称和路径
+                            await showDownloadSuccess(albumId);
+                            albumIdInput.value = '';
+                        } else {
+                            showStatus('error', 
+                                '❌ 下载失败', 
+                                progress.message || '未知错误'
+                            );
+                        }
+                        // 恢复按钮和输入框
+                        downloadBtn.disabled = false;
+                        albumIdInput.disabled = false;
+                        albumIdInput.focus();
+                    }
+                }
+            } catch (error) {
+                console.error('查询进度失败:', error);
+            }
+        }
+        
+        /**
+         * 通过 WebSocket 连接获取进度更新
+         */
+        function startWebSocketProgress(albumId) {
+            currentAlbumId = albumId;
+            progressContainer.classList.add('show');
+            
+            // 构建 WebSocket URL
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsHost = CONFIG.API_BASE_URL.replace(/^https?:\/\//, '').replace(/^wss?:\/\//, '');
+            const wsUrl = `${wsProtocol}//${wsHost}/ws/progress/${albumId}`;
+            
+            try {
+                progressWebSocket = new WebSocket(wsUrl);
+                
+                progressWebSocket.onopen = () => {
+                    console.log('WebSocket 连接已建立');
+                };
+                
+                progressWebSocket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (data.type === 'progress' && data.progress) {
+                            const progress = data.progress;
+                            updateProgressBar(progress);
+                            
+                            // 如果下载完成或失败，关闭连接
+                            if (progress.status === 'completed' || progress.status === 'error') {
+                                stopWebSocketProgress();
+                                if (progress.status === 'completed') {
+                                    // 获取相册名称和路径
+                                    showDownloadSuccess(albumId).then(() => {
+                                        albumIdInput.value = '';
+                                    });
+                                } else {
+                                    showStatus('error', 
+                                        '❌ 下载失败', 
+                                        progress.message || '未知错误'
+                                    );
+                                }
+                                // 恢复按钮和输入框
+                                downloadBtn.disabled = false;
+                                albumIdInput.disabled = false;
+                                albumIdInput.focus();
+                            }
+                        } else if (data.type === 'pong') {
+                            // 心跳响应
+                        }
+                    } catch (error) {
+                        console.error('解析 WebSocket 消息失败:', error);
+                    }
+                };
+                
+                progressWebSocket.onerror = (error) => {
+                    console.error('WebSocket 错误:', error);
+                    // WebSocket 失败时，回退到轮询模式
+                    stopWebSocketProgress();
+                    startProgressPolling(albumId);
+                };
+                
+                progressWebSocket.onclose = () => {
+                    console.log('WebSocket 连接已关闭');
+                    progressWebSocket = null;
+                };
+                
+                // 发送心跳（每30秒）
+                const heartbeatInterval = setInterval(() => {
+                    if (progressWebSocket && progressWebSocket.readyState === WebSocket.OPEN) {
+                        progressWebSocket.send(JSON.stringify({ type: 'ping' }));
+                    } else {
+                        clearInterval(heartbeatInterval);
+                    }
+                }, 30000);
+                
+            } catch (error) {
+                console.error('WebSocket 连接失败:', error);
+                // 回退到轮询模式
+                startProgressPolling(albumId);
+            }
+        }
+        
+        /**
+         * 停止 WebSocket 进度连接
+         */
+        function stopWebSocketProgress() {
+            if (progressWebSocket) {
+                progressWebSocket.close();
+                progressWebSocket = null;
+            }
+            currentAlbumId = null;
+            // 延迟隐藏进度条，让用户看到完成状态
+            setTimeout(() => {
+                progressContainer.classList.remove('show');
+            }, CONFIG.PROGRESS_HIDE_DELAY);
+        }
+
+        // 更新进度条
+        function updateProgressBar(progress) {
+            const percentage = progress.percentage || 0;
+            progressBar.style.width = `${percentage}%`;
+            progressBarText.textContent = percentage > 0 ? `${percentage}%` : '';
+            progressPercentage.textContent = `${percentage}%`;
+            
+            if (progress.total > 0) {
+                progressText.textContent = `${progress.message || '正在下载...'} (${progress.current}/${progress.total})`;
+            } else {
+                progressText.textContent = progress.message || '准备开始...';
+            }
+        }
+
+        // 开始轮询进度（保留用于兼容性，如果 WebSocket 失败时使用）
+        function startProgressPolling(albumId) {
+            currentAlbumId = albumId;
+            progressContainer.classList.add('show');
+            
+            // 立即查询一次
+            checkProgress(albumId);
+            
+            // 定时查询进度
+            progressInterval = setInterval(() => {
+                checkProgress(albumId);
+            }, CONFIG.PROGRESS_POLL_INTERVAL);
+        }
+
+        // 停止轮询进度
+        function stopProgressPolling() {
+            if (progressInterval) {
+                clearInterval(progressInterval);
+                progressInterval = null;
+            }
+            currentAlbumId = null;
+            // 延迟隐藏进度条，让用户看到完成状态
+            setTimeout(() => {
+                progressContainer.classList.remove('show');
+            }, CONFIG.PROGRESS_HIDE_DELAY);
+        }
+
+        async function startDownload() {
+            let albumId = albumIdInput.value.trim();
+
+            if (!albumId) {
+                showStatus('error', '请输入相册ID');
+                return;
+            }
+
+            // 如果ID以JM开头（不区分大小写），自动去除JM前缀
+            if (/^JM/i.test(albumId)) {
+                albumId = albumId.replace(/^JM/i, '');
+                // 更新输入框显示处理后的ID
+                albumIdInput.value = albumId;
+            }
+
+            // 禁用按钮和输入框
+            downloadBtn.disabled = true;
+            albumIdInput.disabled = true;
+            
+            // 显示加载状态
+            showStatus('loading', '正在下载，请稍候...', '相册ID: ' + albumId);
+            
+            // 优先使用 WebSocket，失败时回退到轮询
+            startWebSocketProgress(albumId);
+
+            try {
+                const response = await fetch(`${CONFIG.API_BASE_URL}/download`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        album_id: albumId
+                    })
+                });
+
+                const data = await response.json();
+
+                // 注意：由于下载是异步的，这里只是启动下载任务
+                // 实际的进度会通过轮询获取
+                if (!response.ok) {
+                    stopProgressPolling();
+                    showStatus('error', 
+                        '❌ 下载失败', 
+                        data.message || data.detail || '未知错误'
+                    );
+                    downloadBtn.disabled = false;
+                    albumIdInput.disabled = false;
+                    albumIdInput.focus();
+                }
+            } catch (error) {
+                stopProgressPolling();
+                showStatus('error', 
+                    '❌ 请求失败', 
+                    `无法连接到服务器: ${error.message}<br>请检查API地址是否正确`
+                );
+                downloadBtn.disabled = false;
+                albumIdInput.disabled = false;
+                albumIdInput.focus();
+            }
+        }
+
+        /**
+         * 显示下载成功信息，包含相册名称和跳转链接
+         */
+        async function showDownloadSuccess(albumId) {
+            try {
+                // 获取文件列表，查找包含该album_id的文件夹
+                const response = await fetch(`${CONFIG.API_BASE_URL}/api/files?sort_by=time&order=desc&page=1&page_size=100&_t=${Date.now()}`);
+                const data = await response.json();
+                
+                if (data.success && data.items) {
+                    // 查找包含album_id的文件夹（优先精确匹配，然后模糊匹配）
+                    let folder = data.items.find(item => {
+                        if (item.type !== 'directory') return false;
+                        // 精确匹配：文件夹名称或路径完全包含album_id
+                        const name = item.name;
+                        const path = item.path;
+                        // 检查是否以album_id开头或包含album_id
+                        return name.startsWith(albumId) || 
+                               name.includes(`[${albumId}]`) || 
+                               name.includes(`(${albumId})`) ||
+                               path.includes(albumId);
+                    });
+                    
+                    // 如果没找到，尝试查找最近创建的文件夹（可能是刚下载的）
+                    if (!folder) {
+                        const folders = data.items.filter(item => item.type === 'directory');
+                        if (folders.length > 0) {
+                            // 获取最近创建的文件夹（按时间排序，取第一个）
+                            folder = folders[0];
+                        }
+                    }
+                    
+                    if (folder) {
+                        const folderName = folder.name;
+                        const folderPath = encodeURIComponent(folder.path);
+                        const viewerUrl = `viewer.html?folder=${folderPath}`;
+                        
+                        showStatus('success', 
+                            '✅ 下载完成！', 
+                            `<strong>${folderName}</strong><br>
+                            <a href="${viewerUrl}" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600; margin-top: 8px; display: inline-block; padding: 8px 16px; background: #f0f4ff; border-radius: 6px; transition: all 0.2s;" 
+                               onmouseover="this.style.background='#e0e8ff'; this.style.transform='translateX(2px)'" 
+                               onmouseout="this.style.background='#f0f4ff'; this.style.transform='translateX(0)'">
+                                📖 立即阅读 →
+                            </a>`
+                        );
+                    } else {
+                        // 如果找不到文件夹，显示ID并提供跳转链接
+                        showStatus('success', 
+                            '✅ 下载完成！', 
+                            `相册ID: ${albumId}<br>
+                            <a href="viewer.html" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600; margin-top: 8px; display: inline-block; padding: 8px 16px; background: #f0f4ff; border-radius: 6px; transition: all 0.2s;" 
+                               onmouseover="this.style.background='#e0e8ff'; this.style.transform='translateX(2px)'" 
+                               onmouseout="this.style.background='#f0f4ff'; this.style.transform='translateX(0)'">
+                                📖 打开阅读器 →
+                            </a>`
+                        );
+                    }
+                } else {
+                    // 如果获取文件列表失败，显示ID并提供跳转链接
+                    showStatus('success', 
+                        '✅ 下载完成！', 
+                        `相册ID: ${albumId}<br>
+                        <a href="viewer.html" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600; margin-top: 8px; display: inline-block; padding: 8px 16px; background: #f0f4ff; border-radius: 6px; transition: all 0.2s;" 
+                           onmouseover="this.style.background='#e0e8ff'; this.style.transform='translateX(2px)'" 
+                           onmouseout="this.style.background='#f0f4ff'; this.style.transform='translateX(0)'">
+                            📖 打开阅读器 →
+                        </a>`
+                    );
+                }
+            } catch (error) {
+                console.error('获取相册信息失败:', error);
+                // 如果出错，显示ID并提供跳转链接
+                showStatus('success', 
+                    '✅ 下载完成！', 
+                    `相册ID: ${albumId}<br>
+                    <a href="viewer.html" target="_blank" style="color: #667eea; text-decoration: none; font-weight: 600; margin-top: 8px; display: inline-block; padding: 8px 16px; background: #f0f4ff; border-radius: 6px; transition: all 0.2s;" 
+                       onmouseover="this.style.background='#e0e8ff'; this.style.transform='translateX(2px)'" 
+                       onmouseout="this.style.background='#f0f4ff'; this.style.transform='translateX(0)'">
+                        📖 打开阅读器 →
+                    </a>`
+                );
+            }
+        }
+
+        function showStatus(type, message, details = '') {
+            statusDiv.className = `status ${type} show`;
+            
+            let icon = '';
+            if (type === 'loading') {
+                icon = '<span class="spinner"></span>';
+            } else if (type === 'success') {
+                icon = '✅ ';
+            } else if (type === 'error') {
+                icon = '❌ ';
+            }
+
+            statusDiv.innerHTML = `
+                <div class="status-message">${icon}${message}</div>
+                ${details ? `<div class="status-details">${details}</div>` : ''}
+            `;
+        }
+
+        function clearStatus() {
+            statusDiv.className = 'status';
+            statusDiv.innerHTML = '';
+            albumIdInput.value = '';
+            albumIdInput.focus();
+        }
+
+        // 页面加载时聚焦输入框
+        window.addEventListener('load', () => {
+            // 检查URL参数中是否有album_id，如果有则自动触发下载
+            const urlParams = new URLSearchParams(window.location.search);
+            const albumIdFromUrl = urlParams.get('album_id');
+            if (albumIdFromUrl) {
+                albumIdInput.value = albumIdFromUrl;
+                // 延迟一点执行，确保页面完全加载
+                setTimeout(() => {
+                    startDownload();
+                }, 500);
+            } else {
+                albumIdInput.focus();
+            }
+        });
+
+        // 切换发布页信息显示
+        function togglePublishInfo() {
+            const content = document.getElementById('publishContent');
+            const toggle = document.getElementById('publishToggle');
+            content.classList.toggle('show');
+            toggle.classList.toggle('expanded');
+        }
+    </script>
+</body>
+</html>
+

@@ -1,0 +1,3067 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>图片阅读器 - JMComic</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a1a;
+            color: #fff;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        .viewer-container {
+            display: flex;
+            height: 100vh;
+            width: 100%;
+        }
+
+        /* 侧边栏 - 图片列表 */
+        .sidebar {
+            width: 300px;
+            background: #2a2a2a;
+            border-right: 1px solid #3a3a3a;
+            transition: transform 0.3s;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .sidebar.hidden {
+            transform: translateX(-100%);
+        }
+
+        .sidebar-header {
+            padding: 15px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #3a3a3a;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .sidebar-title {
+            font-size: 16px;
+            font-weight: 600;
+            flex: 1;
+        }
+        
+        .sidebar-header-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        
+        .sidebar-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            min-width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .sidebar-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.3);
+        }
+        
+        .sidebar-btn:active {
+            transform: scale(0.95);
+        }
+
+        /* 源切换选项卡容器 */
+        .source-tabs {
+            display: flex;
+            padding: 10px 15px;
+            background: #1a1a1a;
+            border-bottom: 1px solid #3a3a3a;
+            gap: 10px;
+            overflow-x: auto; /* 防止源太多时溢出 */
+        }
+
+        /* 选项卡按钮 */
+        .tab-btn {
+            flex: 1; /* 平均分配宽度 */
+            background: #2a2a2a;
+            border: 1px solid #3a3a3a;
+            color: #aaa;
+            padding: 8px 0;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: center;
+            white-space: nowrap;
+        }
+
+        .tab-btn:hover {
+            background: #333;
+            color: #fff;
+        }
+
+        /* 激活状态 */
+        .tab-btn.active {
+            background: #667eea; /* 激活色 */
+            color: #fff;
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+
+        .sidebar-section-title {
+            font-size: 12px;
+            color: #aaa;
+            padding: 10px 15px 5px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .toggle-sidebar {
+            background: #3a3a3a;
+            border: none;
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .image-list {
+            padding: 0;
+            display: none;
+        }
+
+        .image-list.has-images {
+            display: block;
+        }
+
+        .image-item {
+            padding: 0;
+            margin: 0;
+            background: transparent;
+            border-radius: 0;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            position: relative;
+        }
+
+        .image-item:hover {
+            background: rgba(102, 126, 234, 0.1);
+        }
+
+        .image-item.active {
+            border-color: #667eea;
+            background: rgba(102, 126, 234, 0.2);
+        }
+
+        .image-item img {
+            width: 100%;
+            height: auto;
+            display: block;
+            border-radius: 0;
+        }
+
+        .image-item-name {
+            display: none;
+        }
+
+        /* 主视图区域 */
+        .main-view {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
+            overflow: hidden;
+            background: #000;
+            min-width: 0; /* 防止 flex 子项溢出 */
+        }
+
+        .toolbar {
+            padding: 10px 20px;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 10;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .toolbar-left, .toolbar-right {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .toolbar-btn {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+
+        .toolbar-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
+        }
+
+        .toolbar-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .image-counter {
+            color: #aaa;
+            font-size: 14px;
+        }
+
+        .image-viewer {
+            flex: 1;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            position: relative;
+            overflow-y: auto;
+            overflow-x: hidden;
+            background: #000;
+            padding: 20px;
+            overscroll-behavior: contain; /* 阻止浏览器默认的橡皮筋效果 */
+            touch-action: pan-y; /* 允许垂直滚动 */
+        }
+        
+        .image-wrapper {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 0px;
+        }
+        
+        /* 图片加载时的骨架屏动画效果 */
+        @keyframes pulse {
+            0% { background-color: #2a2a2a; }
+            50% { background-color: #3a3a3a; }
+            100% { background-color: #2a2a2a; }
+        }
+
+        .image-wrapper img {
+            width: 100%;
+            height: auto;
+            /* 关键：给未加载的图片一个最小高度，防止所有图片挤在视口内导致瞬间全加载 */
+            min-height: 300px; 
+            display: block;
+            object-fit: contain;
+            /* 默认透明，加载完成后通过 .loaded 类显示，制造淡入效果 */
+            opacity: 0;
+            transition: opacity 0.3s ease-in;
+            background: #111; /* 占位背景色 */
+            margin-bottom: 10px;
+        }
+        
+        .image-wrapper img:not(.loaded) {
+            /* 未加载完成时应用呼吸灯动画 */
+            animation: pulse 1.5s infinite ease-in-out;
+            /* 可以在这里放一个 loading svg 图标作为背景 */
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40' viewBox='0 0 50 50'%3E%3Cpath fill='%23667eea' d='M25.251,6.461c-10.318,0-18.683,8.365-18.683,18.683h4.068c0-8.071,6.543-14.615,14.615-14.615V6.461z'%3E%3CanimateTransform attributeType='xml' attributeName='transform' type='rotate' from='0 25 25' to='360 25 25' dur='0.6s' repeatCount='indefinite'/%3E%3C/path%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: center;
+            background-size: 40px;
+        }
+        
+        .image-wrapper img.loaded {
+            opacity: 1;
+            min-height: auto; /* 加载完成后允许自适应高度 */
+            background: transparent;
+            animation: none; /* 加载完成后停止动画 */
+        }
+
+
+
+        /* 加载提示 */
+        .loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #aaa;
+            font-size: 16px;
+        }
+
+        /* 全屏模式 */
+        .fullscreen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: 1000;
+        }
+
+        /* 文件夹浏览器 */
+        .folder-browser {
+            flex: 1;
+            overflow-y: auto;
+            overflow-x: hidden;
+            /* 优化滚动体验 */
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+            position: relative;
+        }
+        
+        /* 文件夹分页控件 - 已移除 */
+        .folder-pagination {
+            display: none !important;
+        }
+        
+        /* 上拉加载提示条样式 */
+        .pull-up-hint {
+            height: 0;
+            overflow: hidden;
+            text-align: center;
+            font-size: 12px;
+            color: #aaa;
+            transition: height 0.2s, opacity 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            background: rgba(0,0,0,0.2);
+        }
+        
+        .pull-up-hint.visible {
+            height: 50px;
+            opacity: 1;
+        }
+        
+        .pull-up-hint .icon {
+            margin-right: 5px;
+            transition: transform 0.3s;
+        }
+        
+        .pull-up-hint.rotate .icon {
+            transform: rotate(180deg);
+        }
+
+        .breadcrumb-container {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        
+        .breadcrumb-nav {
+            font-size: 12px;
+            padding: 8px 10px;
+            background: rgba(26, 26, 26, 0.6);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            flex-wrap: nowrap;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(102, 126, 234, 0.3) transparent;
+            flex: 8;
+            min-width: 0;
+        }
+
+        .breadcrumb-nav::-webkit-scrollbar {
+            height: 4px;
+        }
+
+        .breadcrumb-nav::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .breadcrumb-nav::-webkit-scrollbar-thumb {
+            background: rgba(102, 126, 234, 0.3);
+            border-radius: 2px;
+        }
+
+        .breadcrumb-nav::-webkit-scrollbar-thumb:hover {
+            background: rgba(102, 126, 234, 0.5);
+        }
+        
+        /* 排序控件 */
+        .sort-controls {
+            flex: 2;
+            min-width: 0;
+        }
+        
+        .sort-select {
+            width: 100%;
+            padding: 4px 6px;
+            background: #1a1a1a;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            color: #fff;
+            font-size: 11px;
+            cursor: pointer;
+            outline: none;
+            transition: all 0.2s;
+        }
+        
+        .sort-select:hover {
+            border-color: #667eea;
+            background: #2a2a2a;
+        }
+        
+        .sort-select:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+
+        .breadcrumb-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .breadcrumb-link {
+            cursor: pointer;
+            color: #667eea;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s;
+            background: rgba(102, 126, 234, 0.1);
+            border: 1px solid transparent;
+            font-weight: 500;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+        }
+
+        .breadcrumb-link:hover {
+            background: rgba(102, 126, 234, 0.2);
+            border-color: rgba(102, 126, 234, 0.3);
+            transform: translateY(-1px);
+        }
+
+        .breadcrumb-link:active {
+            transform: translateY(0);
+        }
+
+        .breadcrumb-separator {
+            color: #555;
+            margin: 0 2px;
+            font-size: 10px;
+            user-select: none;
+            flex-shrink: 0;
+        }
+
+        .breadcrumb-current {
+            color: #fff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            background: rgba(102, 126, 234, 0.2);
+            border: 1px solid rgba(102, 126, 234, 0.3);
+            font-weight: 600;
+            cursor: default;
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            display: inline-block;
+        }
+
+        .folder-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 8px;
+            padding: 10px;
+        }
+
+        .folder-item {
+            background: #2a2a2a;
+            border-radius: 6px;
+            padding: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 2px solid transparent;
+            text-align: center;
+            position: relative;
+        }
+
+        .folder-item:hover {
+            background: #3a3a3a;
+            border-color: #667eea;
+        }
+
+        .folder-item.active {
+            border-color: #667eea;
+            background: #3a3a3a;
+        }
+        
+        .folder-item:hover .folder-delete-btn {
+            opacity: 1;
+        }
+        
+        .folder-delete-btn {
+            position: absolute;
+            top: 4px;
+            right: 4px;
+            width: 24px;
+            height: 24px;
+            background: rgba(220, 53, 69, 0.9);
+            border: none;
+            border-radius: 50%;
+            color: #fff;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: all 0.2s;
+            z-index: 10;
+            padding: 0;
+        }
+        
+        .folder-delete-btn:hover {
+            background: rgba(220, 53, 69, 1);
+            transform: scale(1.1);
+        }
+
+        .folder-thumbnail {
+            width: 100%;
+            aspect-ratio: 1;
+            border-radius: 4px;
+            object-fit: cover;
+            margin-bottom: 5px;
+            background: #1a1a1a;
+            image-rendering: -webkit-optimize-contrast;
+            image-rendering: crisp-edges;
+            display: block; /* 改为 block，通过 opacity 控制显示 */
+            opacity: 0;
+            transition: opacity 0.3s;
+            /* 防止图片被选中 */
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+            /* 防止图片拖拽 */
+            -webkit-user-drag: none;
+            -khtml-user-drag: none;
+            -moz-user-drag: none;
+            -o-user-drag: none;
+            pointer-events: none; /* 防止图片本身接收点击事件 */
+        }
+        
+        .folder-thumbnail.loaded {
+            opacity: 1; /* 加载完成后显示 */
+        }
+        
+        /* 在文件夹项上添加透明遮罩层，覆盖缩略图区域 */
+        .folder-item::before {
+            content: '';
+            position: absolute;
+            top: 8px; /* 与 padding 对齐 */
+            left: 8px;
+            right: 8px;
+            /* 缩略图是正方形（aspect-ratio: 1），宽度100%，所以高度等于宽度 */
+            aspect-ratio: 1;
+            border-radius: 4px;
+            background: transparent;
+            z-index: 1;
+            pointer-events: none; /* 遮罩层不阻挡点击事件 */
+            /* 防止选中 */
+            user-select: none;
+            -webkit-user-select: none;
+            -moz-user-select: none;
+            -ms-user-select: none;
+        }
+
+        .folder-name {
+            font-size: 10px;
+            color: #aaa;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            line-height: 1.2;
+        }
+
+        .folder-icon {
+            width: 100%;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            margin-bottom: 5px;
+        }
+        
+        .folder-loading {
+            width: 100%;
+            aspect-ratio: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 5px;
+            position: relative;
+        }
+        
+        .folder-loading-spinner {
+            width: 24px;
+            height: 24px;
+            border: 2px solid rgba(102, 126, 234, 0.3);
+            border-top-color: #667eea;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* 固定导航按钮 */
+        .nav-buttons {
+            position: fixed;
+            right: 20px;
+            bottom: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 1000;
+            transition: right 0.3s ease;
+        }
+
+        .nav-buttons.hidden {
+            right: -80px;
+        }
+
+        .nav-button {
+            width: 50px;
+            height: 50px;
+            background: rgba(102, 126, 234, 0.9);
+            border: none;
+            border-radius: 50%;
+            color: #fff;
+            font-size: 20px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            transition: all 0.2s;
+            backdrop-filter: blur(10px);
+            outline: none;
+        }
+        
+        .nav-button:focus {
+            outline: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+        
+        .nav-button:focus-visible {
+            outline: none;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .nav-button:hover {
+            background: rgba(102, 126, 234, 1);
+            transform: scale(1.1);
+            box-shadow: 0 6px 16px rgba(102, 126, 234, 0.4);
+        }
+
+        .nav-button:active {
+            transform: scale(0.95);
+        }
+
+        .nav-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .nav-button:disabled:hover {
+            transform: none;
+            background: rgba(102, 126, 234, 0.9);
+        }
+        
+        /* 自定义弹窗 */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            backdrop-filter: blur(4px);
+        }
+        
+        .modal-overlay.show {
+            display: flex;
+        }
+        
+        .modal {
+            background: #2a2a2a;
+            border-radius: 12px;
+            padding: 24px;
+            max-width: 400px;
+            width: 90%;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+            animation: modalFadeIn 0.2s ease-out;
+        }
+        
+        @keyframes modalFadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.9);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 16px;
+            color: #fff;
+        }
+        
+        .modal-message {
+            font-size: 14px;
+            color: #ccc;
+            margin-bottom: 24px;
+            line-height: 1.6;
+        }
+        
+        .modal-buttons {
+            display: flex;
+            gap: 12px;
+            justify-content: flex-end;
+        }
+        
+        .modal-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            outline: none;
+        }
+        
+        .modal-btn-primary {
+            background: #667eea;
+            color: #fff;
+        }
+        
+        .modal-btn-primary:hover {
+            background: #5568d3;
+        }
+        
+        .modal-btn-danger {
+            background: #dc3545;
+            color: #fff;
+        }
+        
+        .modal-btn-danger:hover {
+            background: #c82333;
+        }
+        
+        .modal-btn-secondary {
+            background: #3a3a3a;
+            color: #fff;
+        }
+        
+        .modal-btn-secondary:hover {
+            background: #4a4a4a;
+        }
+
+        /* --- 长按反馈遮罩 --- */
+        .long-press-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            opacity: 0;
+            pointer-events: none; /* 让点击穿透，不阻挡操作 */
+            transition: opacity 0.2s;
+        }
+
+        .long-press-overlay.active {
+            opacity: 1;
+        }
+
+        .long-press-overlay .icon {
+            font-size: 40px;
+            margin-bottom: 10px;
+            color: #fff;
+        }
+
+        .long-press-overlay .text {
+            font-size: 18px;
+            color: #fff;
+            font-weight: bold;
+        }
+
+        /* 左右区域高亮渐变 */
+        .long-press-left {
+            background: linear-gradient(90deg, rgba(102, 126, 234, 0.4) 0%, transparent 60%);
+        }
+        .long-press-right {
+            background: linear-gradient(-90deg, rgba(102, 126, 234, 0.4) 0%, transparent 60%);
+        }
+
+        /* 底部上拉提示微调 */
+        .next-chapter-hint {
+            text-align: center;
+            padding: 40px 0;
+            color: #666;
+            font-size: 14px;
+            will-change: transform;
+            /* 增加底部安全区，防止被手机小白条遮挡 */
+            padding-bottom: env(safe-area-inset-bottom, 20px); 
+        }
+
+        /* 移动端返回按钮 */
+        .mobile-back-btn {
+            display: none;
+        }
+
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .viewer-container {
+                display: block;
+                position: relative;
+            }
+
+            .sidebar {
+                width: 100%;
+                height: 100%;
+                position: absolute;
+                top: 0;
+                left: 0;
+                z-index: 10;
+                border-right: none;
+            }
+
+            .main-view {
+                width: 100%;
+                height: 100%;
+                position: absolute;
+                top: 0;
+                left: 0;
+                z-index: 20;
+                /* 默认隐藏阅读器 */
+                display: none !important;
+            }
+
+            /* --- 激活阅读模式的状态 --- */
+            /* 当 body 有这个类时，隐藏 sidebar，显示 main-view */
+            body.mobile-reader-active .sidebar {
+                display: none !important;
+            }
+            body.mobile-reader-active .main-view {
+                display: flex !important;
+            }
+
+            /* 隐藏 PC 端才需要的切换按钮 */
+            .toolbar-left button[onclick="toggleSidebar()"] {
+                display: none;
+            }
+
+            /* 显示移动端返回按钮 */
+            .mobile-back-btn {
+                display: inline-block;
+                background-color: #667eea;
+                border-color: #667eea;
+                font-weight: bold;
+            }
+
+            .toolbar {
+                padding: 8px 10px;
+            }
+
+            .toolbar-btn {
+                padding: 6px 12px;
+                font-size: 12px;
+            }
+
+            .toolbar-left {
+                flex-wrap: wrap;
+            }
+
+            .image-counter {
+                font-size: 12px;
+            }
+            
+            /* 移动端阅读器：减小边距和间距 */
+            body.mobile-reader-active .image-viewer {
+                padding: 5px; /* 从 20px 减小到 5px */
+            }
+            
+            body.mobile-reader-active .image-wrapper img {
+                margin-bottom: 3px; /* 从 10px 减小到 3px */
+            }
+            
+            body.mobile-reader-active .toolbar {
+                padding: 6px 8px; /* 从 8px 10px 减小到 6px 8px */
+            }
+
+            .nav-buttons {
+                right: 10px;
+                bottom: 30px;
+            }
+
+            .nav-button {
+                width: 45px;
+                height: 45px;
+                font-size: 18px;
+            }
+        }
+
+        @media (max-width: 480px) {
+            .sidebar {
+                width: 100%;
+            }
+
+            .toolbar-btn {
+                padding: 5px 10px;
+                font-size: 11px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="viewer-container">
+        <!-- 侧边栏 -->
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">塔台，塔台，中国机长申请起飞</div>
+                <div class="sidebar-header-actions">
+                    <select id="comicDirSelect" class="sidebar-btn" style="padding: 4px 8px; font-size: 12px; cursor: pointer;" onchange="changeComicDir()" title="选择漫画目录">
+                        <option value="JM">JM</option>
+                        <option value="漫画">漫画</option>
+                    </select>
+                    <button class="sidebar-btn" onclick="goToIndex()" title="返回主界面">🏠</button>
+                    <button class="sidebar-btn" onclick="forceRefresh()" title="强制刷新">🔄</button>
+                </div>
+            </div>
+            <div class="folder-browser" id="folderBrowser">
+                <div class="breadcrumb-container">
+                    <div class="breadcrumb-nav" id="folderBreadcrumb">
+                        <span onclick="navigateToFolder('')">📁主目录</span>
+                    </div>
+                    <div class="sort-controls">
+                        <select id="sortSelect" class="sort-select" onchange="changeSort()">
+                            <option value="time-desc">新→旧</option>
+                            <option value="time-asc">旧→新</option>
+                            <option value="name-asc">A→Z</option>
+                            <option value="name-desc">Z→A</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="folder-list" id="folderList">
+                    <div class="loading">加载中...</div>
+                </div>
+                <div class="pull-up-hint" id="pullUpHint">
+                    <span class="icon">↑</span>
+                    <span class="text">上拉加载更多</span>
+                </div>
+            </div>
+            <div class="sidebar-section-title" id="imageListTitle" style="display: none;">图片列表</div>
+            <div class="image-list" id="imageList">
+                <div class="loading">请选择文件夹</div>
+            </div>
+        </div>
+
+        <!-- 主视图 -->
+        <div class="main-view">
+            <div class="toolbar">
+                <div class="toolbar-left">
+                    <button class="toolbar-btn mobile-back-btn" onclick="goToParent()" title="返回上一级">⬅ 返回选集</button>
+                    <button class="toolbar-btn" onclick="toggleSidebar()" title="显示/隐藏列表">📋 列表</button>
+                    <button class="toolbar-btn" onclick="toggleFullscreen()" title="全屏/退出全屏">⛶ 全屏</button>
+                    <button class="toolbar-btn" onclick="goToIndex()" title="返回主界面">🏠 主页</button>
+                </div>
+                <div class="toolbar-right">
+                    <span class="image-counter" id="imageCounter">0 / 0</span>
+                </div>
+            </div>
+            <div class="image-viewer scroll-mode" id="imageViewer">
+                <div class="image-wrapper" id="imageWrapper">
+                    <div class="loading" id="loadingText">请从左侧选择图片</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 固定导航按钮 -->
+    <div class="nav-buttons" id="navButtons">
+        <button type="button" class="nav-button" id="goUpBtn" onclick="scrollToTop(event)" title="返回顶部">⬆</button>
+        <!-- 隐藏返回上一层级按钮，只保留侧边栏返回功能 -->
+        <!-- <button type="button" class="nav-button" id="goRootBtn" onclick="goToParent()" title="返回上一层级">⬅</button> -->
+    </div>
+    
+    <!-- 自定义弹窗 -->
+    <div class="modal-overlay" id="modalOverlay" onclick="closeModalOnOverlay(event)">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-title" id="modalTitle"></div>
+            <div class="modal-message" id="modalMessage"></div>
+            <div class="modal-buttons" id="modalButtons"></div>
+        </div>
+    </div>
+    
+    <!-- 长按反馈遮罩 -->
+    <div id="longPressOverlay" class="long-press-overlay">
+        <div class="icon"></div>
+        <div class="text"></div>
+    </div>
+
+    <script>
+        // ==================== 配置区域 ====================
+        const CONFIG = {
+            // 后端API地址配置
+            API_BASE_URL: (() => {
+                // 优先从URL参数获取
+                const urlParams = new URLSearchParams(window.location.search);
+                if (urlParams.get('api')) {
+                    return urlParams.get('api');
+                }
+                // 从环境变量或localStorage获取
+                if (window.API_BASE_URL) {
+                    return window.API_BASE_URL;
+                }
+                const savedApi = localStorage.getItem('api_base_url');
+                if (savedApi) {
+                    return savedApi;
+                }
+                // 默认使用当前页面的协议和主机名，端口8000
+                // 如果前端通过域名访问，API也使用相同域名，但端口8000
+                const protocol = window.location.protocol;
+                const hostname = window.location.hostname;
+                // 如果是 localhost 或 127.0.0.1，直接使用 localhost:8000
+                if (hostname === 'localhost' || hostname === '127.0.0.1') {
+                    return 'http://localhost:8000';
+                }
+                // 否则使用当前主机名，但端口8000（假设后端在同一服务器）
+                return `${protocol}//${hostname}:8000`;
+            })(),
+            // 支持的图片格式
+            IMAGE_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp']
+        };
+        
+        // 保存API地址到localStorage（如果通过URL参数设置）
+        if (new URLSearchParams(window.location.search).get('api')) {
+            localStorage.setItem('api_base_url', CONFIG.API_BASE_URL);
+        }
+        
+        // ==================== 工具函数 ====================
+        /**
+         * 安全转义 HTML，防止 XSS 攻击
+         * @param {string} text - 需要转义的文本
+         * @returns {string} 转义后的 HTML 安全字符串
+         */
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // ==================== 移动端视图控制 ====================
+        /**
+         * 进入移动端阅读器模式
+         */
+        function enterMobileReader() {
+            if (window.innerWidth <= 768) {
+                document.body.classList.add('mobile-reader-active');
+                // 进入阅读器时，确保滚动条在顶部
+                const imageViewer = document.getElementById('imageViewer');
+                if (imageViewer) {
+                    imageViewer.scrollTop = 0;
+                }
+            }
+        }
+        
+        /**
+         * 退出移动端阅读器模式
+         */
+        function exitMobileReader() {
+            if (window.innerWidth <= 768) {
+                document.body.classList.remove('mobile-reader-active');
+            }
+        }
+        
+        // ==================== 状态变量 ====================
+        let currentImages = [];
+        let currentIndex = -1;
+        let currentFolderPath = '';
+        let folderHistory = ['']; // 文件夹历史路径
+        let currentSort = 'time-desc'; // 当前排序方式：time-desc, time-asc, name-asc, name-desc
+        let currentPage = 1; // 当前页码（所有目录都使用）
+        let folderPageMap = {}; // 记录每个路径的页码 {path: page}
+        let pageSize = 20; // 每页显示数量
+        let totalFolders = 0; // 总文件夹数
+        let totalPages = 1; // 总页数
+        let currentComicDir = localStorage.getItem('selectedComicDir') || 'JM'; // 当前选择的漫画目录（从 localStorage 读取或默认 JM）
+        let imageLoadQueue = []; // 图片加载队列
+        let isLoadingImages = false; // 是否正在加载图片
+        let loadedImageCount = 0; // 已加载的图片数量
+        const BATCH_SIZE = 5; // 每批加载的图片数量
+        const PRELOAD_RANGE = 5; // 预加载当前图片前后各几张（从3增加到5，提前加载更多）
+        let isLoadingFolders = false; // 是否正在加载文件夹（防止重复加载）
+        let hasReachedEnd = false; // 是否已经到达最后一页（防止无限加载）
+        let consecutiveFailures = 0; // 连续失败次数
+        const MAX_CONSECUTIVE_FAILURES = 3; // 最大连续失败次数，超过后停止自动加载
+        let consecutiveEmptyPages = 0; // 连续空页计数（没有文件夹的页数）
+        const MAX_CONSECUTIVE_EMPTY_PAGES = 5; // 最大连续空页数，超过后停止自动加载
+        let mainImageObserver = null; // 主图观察器（全局变量，方便销毁）
+        let pageCounterObserver = null; // 页码计数器观察器（全局变量，方便销毁）
+        let thumbnailObserver; // 缩略图观察器
+
+        // ==================== 初始化函数 ====================
+        /**
+         * 初始化应用
+         */
+        async function init() {
+            const urlParams = new URLSearchParams(window.location.search);
+            
+            // 加载可用的漫画目录列表
+            await loadComicDirs();
+            
+            setupKeyboard();
+            setupObservers(); // 注册观察器
+            setupPullUpToLoad(); // 注册上拉手势（替换原来的 setupScrollToLoad）
+            setupImageViewerInteractions(); // 注册图片查看器的长按和上拉跳转交互
+            updateNavButtons();
+
+            // 1. 处理浏览器后退/前进按钮
+            window.addEventListener('popstate', async (event) => {
+                // 优先退出移动端阅读器样式
+                if (document.body.classList.contains('mobile-reader-active')) {
+                    exitMobileReader();
+                    // ★★★ 关键修改：删除 return 后，代码会继续往下执行，
+                    // 浏览器已经回退了 URL，下面会获取 event.state.folder (即上一级目录) 并加载它
+                    // return; 
+                }
+                
+                if (event.state && event.state.folder !== undefined) {
+                    // 历史记录里有状态，加载对应文件夹 (传入 false 表示这是历史记录操作，不要再 pushState)
+                    await navigateToFolder(event.state.folder, false);
+                } else {
+                    // 历史记录为空（通常是回到了首页），加载根目录
+                    await navigateToFolder('', false);
+                }
+            });
+
+            // 2. 初始加载
+            // 如果 URL 参数里有 folder，加载它；否则加载根目录
+            const initialFolder = urlParams.get('folder') || '';
+            
+            // 替换当前历史记录状态，确保初始状态正确
+            history.replaceState({ folder: initialFolder }, '', initialFolder ? `?folder=${encodeURIComponent(initialFolder)}` : window.location.pathname);
+            
+            await loadFolders(initialFolder || '', 1);
+            if (initialFolder) {
+                await navigateToFolder(initialFolder, false);
+            }
+            
+            // 输出配置信息（开发调试用）
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                console.log('API Base URL:', CONFIG.API_BASE_URL);
+            }
+        }
+
+        // ==================== API调用函数 ====================
+        /**
+         * 获取文件夹的第一张图片作为缩略图
+         * 缓存由后端 Redis 处理
+         */
+        async function getFolderThumbnail(folderPath, cacheBuster = null) {
+            try {
+                const cacheParam = cacheBuster ? `&_t=${cacheBuster}` : '';
+                const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                const url = `${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(folderPath)}${comicDirParam}${cacheParam}`;
+                
+                const fetchOptions = cacheBuster ? {
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                } : {};
+                
+                const response = await fetch(url, fetchOptions);
+                const data = await response.json();
+                
+                if (data.success && data.items) {
+                    const firstImage = data.items.find(item => {
+                        if (item.type === 'directory') return false;
+                        const lastDotIndex = item.name.lastIndexOf('.');
+                        if (lastDotIndex === -1 || lastDotIndex === item.name.length - 1) {
+                            return false;
+                        }
+                        const ext = item.name.toLowerCase().substring(lastDotIndex);
+                        return CONFIG.IMAGE_EXTENSIONS.includes(ext);
+                    });
+                    
+                    if (firstImage) {
+                        // 使用缩略图API生成封面图片
+                        const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                        return `${CONFIG.API_BASE_URL}/api/thumbnail/${encodeURIComponent(folderPath)}?width=200&height=200${comicDirParam}`;
+                    }
+                }
+            } catch (error) {
+                console.error('获取缩略图失败:', error);
+            }
+            
+            return null;
+        }
+
+        /**
+         * 加载可用的漫画目录列表
+         */
+        async function loadComicDirs() {
+            try {
+                const response = await fetch(`${CONFIG.API_BASE_URL}/api/comic-dirs`);
+                const data = await response.json();
+                
+                if (data.success && data.dirs) {
+                    const select = document.getElementById('comicDirSelect');
+                    if (select) {
+                        // 只保留 JM 和 漫画 两个选项
+                        select.innerHTML = '';
+                        
+                        // 添加 JM 选项
+                        const jmOption = document.createElement('option');
+                        jmOption.value = 'JM';
+                        jmOption.textContent = 'JM';
+                        select.appendChild(jmOption);
+                        
+                        // 添加 漫画 选项
+                        const comicOption = document.createElement('option');
+                        comicOption.value = '漫画';
+                        comicOption.textContent = '漫画';
+                        select.appendChild(comicOption);
+                        
+                        // 确定当前应该选中的目录
+                        // 1. 优先使用已保存的选择（localStorage 或 currentComicDir）
+                        // 2. 如果当前值不是 'JM' 或 '漫画'，检查后端返回的 current 值
+                        // 3. 如果都不符合，默认使用 'JM'
+                        let targetDir = currentComicDir;
+                        
+                        // 如果当前值不是 'JM' 或 '漫画'，需要重新确定
+                        if (targetDir !== 'JM' && targetDir !== '漫画') {
+                            // 检查后端返回的 current 值
+                            if (data.current === 'JM' || data.current === '漫画') {
+                                targetDir = data.current;
+                            } else {
+                                // 默认使用 'JM'
+                                targetDir = 'JM';
+                            }
+                            // 更新 currentComicDir
+                            currentComicDir = targetDir;
+                        }
+                        
+                        // 确保 currentComicDir 是有效的值
+                        if (currentComicDir !== 'JM' && currentComicDir !== '漫画') {
+                            currentComicDir = 'JM';
+                        }
+                        
+                        // 设置下拉框的选中状态
+                        select.value = currentComicDir;
+                        
+                        // 根据当前目录设置默认排序
+                        if (currentComicDir === 'JM') {
+                            currentSort = 'time-desc';
+                        } else if (currentComicDir === '漫画') {
+                            currentSort = 'name-asc';
+                        } else {
+                            currentSort = 'time-desc';
+                        }
+                        
+                        // 更新排序选择框
+                        const sortSelect = document.getElementById('sortSelect');
+                        if (sortSelect) {
+                            sortSelect.value = currentSort;
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('加载漫画目录列表失败:', error);
+            }
+        }
+
+        /**
+         * 切换漫画目录
+         */
+        function changeComicDir() {
+            const select = document.getElementById('comicDirSelect');
+            if (select) {
+                const newDir = select.value;
+                
+                // 如果选择没有变化，直接返回
+                if (newDir === currentComicDir) {
+                    return;
+                }
+                
+                currentComicDir = newDir;
+                
+                // 保存用户选择到 localStorage
+                localStorage.setItem('selectedComicDir', currentComicDir);
+                
+                // 根据不同的目录设置不同的默认排序
+                // JM 目录：默认按时间降序（新→旧）
+                // 漫画目录：默认按名称升序（A→Z）
+                if (currentComicDir === 'JM') {
+                    currentSort = 'time-desc';
+                } else if (currentComicDir === '漫画') {
+                    currentSort = 'name-asc';
+                } else {
+                    // 其他目录默认使用时间降序
+                    currentSort = 'time-desc';
+                }
+                
+                // 更新排序选择框
+                const sortSelect = document.getElementById('sortSelect');
+                if (sortSelect) {
+                    sortSelect.value = currentSort;
+                }
+                
+                // 重置到根目录并重新加载
+                currentFolderPath = '';
+                folderHistory = [''];
+                currentPage = 1;
+                // 重置加载状态标志
+                hasReachedEnd = false; // 重置到底标志
+                totalPages = 1;        // 重置总页数，防止被上一个文件夹的总页数误导
+                consecutiveFailures = 0;
+                consecutiveEmptyPages = 0; // 重置连续空页计数
+                // 更新面包屑导航
+                const breadcrumb = document.getElementById('folderBreadcrumb');
+                if (breadcrumb) {
+                    breadcrumb.innerHTML = '<span onclick="navigateToFolder(\'\')">📁主目录</span>';
+                }
+                loadFolders('', 1, Date.now()); // 使用时间戳强制刷新
+            }
+        }
+
+        // 改变排序方式
+        function changeSort() {
+            const sortSelect = document.getElementById('sortSelect');
+            currentSort = sortSelect.value;
+            // 重新加载当前文件夹（重置到第一页）
+            currentPage = 1;
+            folderPageMap[currentFolderPath || ''] = 1;
+            // 重置加载状态标志
+            hasReachedEnd = false; // 重置到底标志
+            totalPages = 1;        // 重置总页数，防止被上一个文件夹的总页数误导
+            consecutiveFailures = 0;
+            loadFolders(currentFolderPath || '', 1);
+        }
+        
+        // 加载文件夹列表
+        async function loadFolders(path = '', page = 1, cacheBuster = null, append = false) {
+            // 如果正在加载，且不是追加模式，直接返回
+            if (isLoadingFolders && !append) {
+                return;
+            }
+            
+            // 如果是追加模式，且已经到底了，坚决不加载
+            if (append && (hasReachedEnd || page > totalPages)) {
+                return; 
+            }
+            
+            // 如果是追加模式，显示加载提示
+            if (append) {
+                if (isLoadingFolders) return; // 防止重复追加
+                isLoadingFolders = true;
+                const folderList = document.getElementById('folderList');
+                const loadingDiv = document.createElement('div');
+                loadingDiv.className = 'loading';
+                loadingDiv.id = 'loadingMore';
+                loadingDiv.textContent = '加载中...';
+                folderList.appendChild(loadingDiv);
+            } else {
+                const folderList = document.getElementById('folderList');
+                folderList.innerHTML = '<div class="loading">加载中...</div>';
+            }
+            
+            isLoadingFolders = true;
+            
+            try {
+                // 解析排序参数
+                const [sortBy, order] = currentSort.split('-');
+                // 所有目录都使用分页
+                const pageParam = `&page=${page}&page_size=${pageSize}`;
+                // 添加强制刷新参数（绕过缓存）
+                const cacheParam = cacheBuster ? `&_t=${cacheBuster}` : '';
+                const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                const url = path ? 
+                    `${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(path)}&sort_by=${sortBy}&order=${order}${pageParam}${comicDirParam}${cacheParam}` : 
+                    `${CONFIG.API_BASE_URL}/api/files?sort_by=${sortBy}&order=${order}${pageParam}${comicDirParam}${cacheParam}`;
+                
+                // 使用 no-cache 选项强制获取最新数据
+                const fetchOptions = cacheBuster ? {
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                } : {};
+                
+                const response = await fetch(url, fetchOptions);
+                const data = await response.json();
+                
+                // 调试：输出API响应
+                if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                    console.log('loadFolders API响应:', { path, page, url, data });
+                }
+                
+                // 检查响应数据
+                if (!data) {
+                    console.error('API返回数据为空');
+                    consecutiveFailures++;
+                    const folderList = document.getElementById('folderList');
+                    if (!append) {
+                        folderList.innerHTML = '<div class="loading" style="grid-column: 1/-1;">API返回数据为空</div>';
+                    } else {
+                        // 追加模式下，如果连续失败太多次，停止加载
+                        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                            hasReachedEnd = true;
+                            const loadingMore = document.getElementById('loadingMore');
+                            if (loadingMore) {
+                                loadingMore.remove();
+                            }
+                        }
+                    }
+                    return;
+                }
+                
+                // 如果API返回错误，也显示错误信息
+                if (!data.success) {
+                    console.error('API返回错误:', data);
+                    consecutiveFailures++;
+                    const folderList = document.getElementById('folderList');
+                    if (!append) {
+                        folderList.innerHTML = `<div class="loading" style="grid-column: 1/-1;">加载失败: ${data.detail || '未知错误'}</div>`;
+                    } else {
+                        // 追加模式下，如果连续失败太多次，停止加载
+                        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                            hasReachedEnd = true;
+                            const loadingMore = document.getElementById('loadingMore');
+                            if (loadingMore) {
+                                loadingMore.remove();
+                            }
+                        }
+                    }
+                    return;
+                }
+                
+                // 成功加载，重置失败计数器
+                consecutiveFailures = 0;
+                
+                if (data.items) {
+                    // 更新总页数
+                    if (data.total_pages !== undefined) {
+                        totalPages = data.total_pages;
+                        totalFolders = data.total;
+                        // 调试信息
+                        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                            console.log('分页信息:', { 
+                                currentPage: page, 
+                                totalPages, 
+                                totalFolders, 
+                                itemsCount: data.items.length,
+                                foldersCount: data.items.filter(item => item.type === 'directory').length
+                            });
+                        }
+                    }
+                    
+                    // 过滤文件夹
+                    const newFolders = data.items.filter(item => item.type === 'directory');
+
+                    // --- 修复：检查是否为空 ---
+                    // 只有当没有文件夹且已经是最后一页时，才认为到底了
+                    if (newFolders.length === 0) {
+                        // 更新当前页码
+                        currentPage = page;
+                        folderPageMap[path || ''] = currentPage;
+                        
+                        // 增加连续空页计数
+                        consecutiveEmptyPages++;
+                        
+                        // 检查是否还有下一页，且连续空页数未超过限制
+                        if (currentPage >= totalPages || consecutiveEmptyPages >= MAX_CONSECUTIVE_EMPTY_PAGES) {
+                            // 确实是最后一页，或者连续太多空页，认为到底了
+                            hasReachedEnd = true;
+                            consecutiveEmptyPages = 0; // 重置计数器
+                            if (append) {
+                                const loadingMore = document.getElementById('loadingMore');
+                                if (loadingMore) loadingMore.remove();
+                                
+                                const hintEl = document.getElementById('pullUpHint');
+                                if (hintEl) {
+                                    const hintText = hintEl.querySelector('.text');
+                                    if (hintText) hintText.textContent = "没有更多了";
+                                }
+                            } else {
+                                const folderList = document.getElementById('folderList');
+                                folderList.innerHTML = '<div class="loading" style="grid-column: 1/-1;">没有子文件夹</div>';
+                            }
+                            return;
+                        } else {
+                            // 还有下一页，但当前页没有文件夹，继续加载下一页
+                            if (append) {
+                                const loadingMore = document.getElementById('loadingMore');
+                                if (loadingMore) loadingMore.remove();
+                                
+                                // 自动加载下一页
+                                const nextPage = currentPage + 1;
+                                folderPageMap[path || ''] = nextPage;
+                                await loadFolders(path, nextPage, cacheBuster, true);
+                            } else {
+                                // 非追加模式，如果第一页就没有文件夹，显示提示
+                                const folderList = document.getElementById('folderList');
+                                folderList.innerHTML = '<div class="loading" style="grid-column: 1/-1;">当前页没有子文件夹，正在加载下一页...</div>';
+                                // 自动加载下一页
+                                const nextPage = currentPage + 1;
+                                folderPageMap[path || ''] = nextPage;
+                                await loadFolders(path, nextPage, cacheBuster, false);
+                            }
+                            return;
+                        }
+                    }
+                    
+                    // 如果有文件夹，重置连续空页计数
+                    consecutiveEmptyPages = 0;
+
+                    // --- 核心修复：检查是否重复 ---
+                    // 如果是追加模式，检查新加载的第一个文件夹是否已经存在于列表中
+                    // 防止后端页码计算错误导致返回重复数据
+                    if (append) {
+                        const folderList = document.getElementById('folderList');
+                        const lastItem = folderList.lastElementChild;
+                        if (lastItem) {
+                            const lastTitle = lastItem.getAttribute('title'); // 获取已存在的最后一个文件夹名
+                            if (newFolders.length > 0 && newFolders[0].name === lastTitle) {
+                                console.warn('检测到重复数据，停止加载');
+                                hasReachedEnd = true;
+                                const loadingMore = document.getElementById('loadingMore');
+                                if (loadingMore) loadingMore.remove();
+                                return;
+                            }
+                        }
+                    }
+                    
+                    // 使用 newFolders 作为 folders
+                    const folders = newFolders;
+                    
+                    if (folders.length > 0) {
+                        const folderList = document.getElementById('folderList');
+                        
+                        // 如果是追加模式，移除加载提示
+                        if (append) {
+                            const loadingMore = document.getElementById('loadingMore');
+                            if (loadingMore) {
+                                loadingMore.remove();
+                            }
+                        } else {
+                            folderList.innerHTML = '';
+                        }
+                        
+                        let html = '';
+                        // 获取当前已有的文件夹数量（用于索引）
+                        const existingCount = folderList.querySelectorAll('.folder-item').length;
+                        // 先渲染所有文件夹项（不等待缩略图）
+                        folders.forEach((folder, index) => {
+                            // 1. 生成安全的 DOM 字符串（用于 HTML 内容）
+                            const safeName = escapeHtml(folder.name);
+                            // 2. 路径转义（用于 JS 参数）
+                            const jsPath = folder.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                            const jsName = folder.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                            const uniqueId = `folder-${Date.now()}-${existingCount + index}`;
+                            
+                            html += `
+                                <div class="folder-item" onclick="navigateToFolder('${jsPath}')" title="${safeName}" data-folder-index="${existingCount + index}">
+                                    <button class="folder-delete-btn" onclick="event.stopPropagation(); deleteFolder('${jsPath}', '${jsName}')" title="删除文件夹">×</button>
+                                    <div class="folder-loading" id="loading-${uniqueId}">
+                                        <div class="folder-loading-spinner"></div>
+                                    </div>
+                                    <div class="folder-icon" id="icon-${uniqueId}" style="display: none;">📁</div>
+                                    <div class="folder-name">${safeName}</div>
+                                </div>
+                            `;
+                        });
+                        // 追加或设置HTML
+                        if (append) {
+                            folderList.insertAdjacentHTML('beforeend', html);
+                        } else {
+                            folderList.innerHTML = html;
+                        }
+                        
+                        // 异步加载缩略图（不阻塞渲染）
+                        folders.forEach(async (folder, index) => {
+                            const folderItem = folderList.querySelector(`[data-folder-index="${existingCount + index}"]`);
+                            if (!folderItem) return;
+                            
+                            // 获取唯一的 ID
+                            const loadingEl = folderItem.querySelector('.folder-loading');
+                            const iconEl = folderItem.querySelector('.folder-icon');
+                            
+                            try {
+                                // 如果是在强制刷新模式下，缩略图也需要绕过缓存
+                                const thumbnail = await getFolderThumbnail(folder.path, cacheBuster);
+                                if (thumbnail) {
+                                    const img = document.createElement('img');
+                                    img.className = 'folder-thumbnail';
+                                    img.alt = '';
+                                    
+                                    // 使用 data-src 进行懒加载
+                                    const realSrc = cacheBuster ? `${thumbnail}${thumbnail.includes('?') ? '&' : '?'}_t=${cacheBuster}` : thumbnail;
+                                    
+                                    // 如果支持观察器，用 data-src
+                                    if (thumbnailObserver) {
+                                        img.setAttribute('data-src', realSrc);
+                                        img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"; // 透明占位
+                                        thumbnailObserver.observe(img);
+                                    } else {
+                                        img.src = realSrc; // 降级处理
+                                    }
+                                    
+                                    // 先插入DOM
+                                    if (loadingEl && loadingEl.nextSibling) {
+                                        folderItem.insertBefore(img, loadingEl.nextSibling);
+                                    } else if (iconEl) {
+                                        folderItem.insertBefore(img, iconEl);
+                                    } else {
+                                        folderItem.insertBefore(img, folderItem.querySelector('.folder-name'));
+                                    }
+                                    
+                                    // 隐藏 loading，显示图片占位
+                                    if (loadingEl) loadingEl.style.display = 'none';
+                                    if (iconEl) iconEl.style.display = 'none';
+                                    
+                                    // 设置加载完成和失败的回调
+                                    img.onload = () => {
+                                        // 如果是占位图onload不处理，只有真实图片加载才处理
+                                        if (img.src !== "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7") {
+                                            img.classList.add('loaded'); // 显示图片
+                                        }
+                                    };
+                                    
+                                    img.onerror = () => {
+                                        // 缩略图加载失败：隐藏加载动画，显示默认图标，移除图片
+                                        if (loadingEl) loadingEl.style.display = 'none';
+                                        if (iconEl) iconEl.style.display = 'flex';
+                                        img.remove();
+                                    };
+                                } else {
+                                    // 没有缩略图：隐藏加载动画，显示默认图标
+                                    if (loadingEl) loadingEl.style.display = 'none';
+                                    if (iconEl) iconEl.style.display = 'flex';
+                                }
+                            } catch (error) {
+                                // 加载出错：隐藏加载动画，显示默认图标
+                                console.error('加载缩略图失败:', error);
+                                if (loadingEl) loadingEl.style.display = 'none';
+                                if (iconEl) iconEl.style.display = 'flex';
+                            }
+                        });
+                    } else {
+                        const folderList = document.getElementById('folderList');
+                        if (!append) {
+                            folderList.innerHTML = '<div class="loading" style="grid-column: 1/-1;">没有子文件夹</div>';
+                        } else {
+                            const loadingMore = document.getElementById('loadingMore');
+                            if (loadingMore) {
+                                loadingMore.remove();
+                            }
+                        }
+                    }
+                    
+                    // 渲染完毕后，更新当前页码
+                    currentPage = page;
+                    // 保存当前路径的页码
+                    folderPageMap[path || ''] = currentPage;
+                    updateFolderPagination();
+                    
+                    // 再次检查是否到达最后一页
+                    // 只有当确实是最后一页时，才认为到底了
+                    // 如果当前页返回的文件夹数量等于 pageSize，可能还有下一页（即使 totalPages 显示只有1页，也可能有更多数据）
+                    if (currentPage >= totalPages) {
+                        // 如果当前页返回的文件夹数量等于 pageSize，可能后端的分页信息不准确，不应该设置 hasReachedEnd
+                        const foldersCount = newFolders.length;
+                        if (foldersCount === pageSize) {
+                            // 当前页返回的文件夹数量等于 pageSize，可能还有下一页，不设置 hasReachedEnd
+                            hasReachedEnd = false;
+                            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                                console.warn('当前页返回的文件夹数量等于 pageSize，但 totalPages 显示已到底，可能存在分页信息不准确的问题');
+                            }
+                        } else {
+                            hasReachedEnd = true;
+                        }
+                    } else {
+                        // 还有下一页，不应该设置 hasReachedEnd
+                        hasReachedEnd = false;
+                    }
+                    
+                    updateFolderBreadcrumb(path);
+                }
+            } catch (error) {
+                consecutiveFailures++;
+                const folderList = document.getElementById('folderList');
+                if (!append) {
+                    folderList.innerHTML = '<div class="loading" style="grid-column: 1/-1;">加载失败</div>';
+                } else {
+                    const loadingMore = document.getElementById('loadingMore');
+                    if (loadingMore) {
+                        loadingMore.textContent = '加载失败';
+                        // 如果连续失败太多次，停止加载
+                        if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+                            hasReachedEnd = true;
+                            loadingMore.remove();
+                        }
+                    }
+                }
+                console.error('加载文件夹失败:', error);
+            } finally {
+                isLoadingFolders = false;
+                // 确保上拉提示条收回
+                const hintEl = document.getElementById('pullUpHint');
+                if (hintEl && !isLoadingFolders) { // 只有在非加载状态才强制收回
+                    // 如果刚好加载完最后一页，让提示条显示"没有更多了"一秒再收回
+                    if (hasReachedEnd && append) {
+                        const hintText = hintEl.querySelector('.text');
+                        if (hintText) hintText.textContent = "已加载全部";
+                        setTimeout(() => {
+                            hintEl.style.height = '0';
+                            hintEl.style.opacity = '0';
+                        }, 800);
+                    } else {
+                        hintEl.style.height = '0';
+                        hintEl.style.opacity = '0';
+                    }
+                    hintEl.classList.remove('rotate');
+                }
+            }
+        }
+        
+        // 更新文件夹分页控件
+        function updateFolderPagination() {
+            const paginationDiv = document.getElementById('folderPagination');
+            if (!paginationDiv) return;
+            
+            if (totalPages > 1) {
+                paginationDiv.style.display = 'flex';
+                const prevBtn = document.getElementById('folderPrevPage');
+                const nextBtn = document.getElementById('folderNextPage');
+                const pageInfo = document.getElementById('folderPageInfo');
+                
+                if (prevBtn) prevBtn.disabled = currentPage <= 1;
+                if (nextBtn) nextBtn.disabled = currentPage >= totalPages;
+                if (pageInfo) pageInfo.textContent = `${currentPage} / ${totalPages} (共 ${totalFolders} 个)`;
+            } else {
+                paginationDiv.style.display = 'none';
+            }
+        }
+        
+        // 切换文件夹页面
+        function changeFolderPage(delta) {
+            const newPage = currentPage + delta;
+            if (newPage >= 1 && newPage <= totalPages) {
+                // 保存当前路径的页码
+                folderPageMap[currentFolderPath || ''] = newPage;
+                // 重置加载状态标志（切换页面时重置，因为可能还有更多数据）
+                hasReachedEnd = false;
+                consecutiveFailures = 0;
+                consecutiveEmptyPages = 0; // 重置连续空页计数
+                loadFolders(currentFolderPath || '', newPage, null, false);
+            }
+        }
+        
+        // ==================== 性能优化：IntersectionObserver ====================
+        // 用于懒加载图片和缩略图，只有出现在屏幕里才加载
+        // ==================== 核心优化：图片懒加载管理器 ====================
+        
+        // 初始化图片观察器
+        function initImageObserver() {
+            // 如果已存在，先销毁
+            if (mainImageObserver) {
+                mainImageObserver.disconnect();
+            }
+
+            // 创建新的观察器
+            const imageViewer = document.getElementById('imageViewer');
+            if (!imageViewer || !('IntersectionObserver' in window)) {
+                return;
+            }
+
+            mainImageObserver = new IntersectionObserver((entries, observer) => {
+                entries.forEach(entry => {
+                    // 当图片进入视口（或者接近视口）时
+                    if (entry.isIntersecting) {
+                        const img = entry.target;
+                        const realSrc = img.getAttribute('data-src');
+                        
+                        if (realSrc) {
+                            // 只要开始加载了，就停止观察它（避免重复触发）
+                            observer.unobserve(img);
+                            
+                            // 开始加载图片
+                            img.src = realSrc;
+                            
+                            // 检查图片是否已经加载完成（可能在缓存中）
+                            if (img.complete && img.naturalHeight !== 0) {
+                                // 图片已经在缓存中，立即显示
+                                img.classList.add('loaded');
+                                img.removeAttribute('data-src');
+                            } else {
+                                // 加载完成后移除 data-src 标记，添加 loaded 类
+                                img.onload = () => {
+                                    img.classList.add('loaded');
+                                    img.removeAttribute('data-src'); 
+                                };
+                                
+                                // 加载失败处理
+                                img.onerror = () => {
+                                    // 加载失败时，移除占位图，显示错误状态
+                                    img.style.display = 'none';
+                                    console.error('图片加载失败:', realSrc);
+                                };
+                            }
+                        }
+                    }
+                });
+            }, {
+                root: imageViewer, // 监视容器
+                rootMargin: '1000px 0px', // 关键配置：提前1000px加载（从500px增加到1000px），提前加载更多
+                threshold: 0.01 // 只要露出1%就触发
+            });
+        }
+        
+        // ==================== 修复：精准页码计数器 ====================
+        function initPageCounterObserver() {
+            const viewer = document.getElementById('imageViewer');
+            
+            // 先销毁旧的
+            if (pageCounterObserver) {
+                pageCounterObserver.disconnect();
+            }
+            
+            if (!viewer || !('IntersectionObserver' in window)) {
+                return;
+            }
+
+            const options = {
+                root: viewer,
+                // ★★★ 核心魔法：将检测区域缩小为屏幕中间的一条线 ★★★
+                // '-50% 0px -50% 0px' 意味着上下各缩减50%，只剩中间
+                rootMargin: '-50% 0px -50% 0px', 
+                threshold: 0
+            };
+
+            pageCounterObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        // 只有当图片穿过屏幕中心线时，才更新页码
+                        const index = parseInt(entry.target.dataset.index);
+                        if (!isNaN(index)) {
+                            // 更新全局 currentIndex，保证后续操作（如刷新）能记住位置
+                            currentIndex = index; 
+                            updateUI();
+                        }
+                    }
+                });
+            }, options);
+        }
+        
+        // 初始化缩略图观察器
+        function setupObservers() {
+            // 缩略图观察器
+            if ('IntersectionObserver' in window) {
+                const folderBrowser = document.getElementById('folderBrowser');
+                if (folderBrowser) {
+                    thumbnailObserver = new IntersectionObserver((entries, observer) => {
+                        entries.forEach(entry => {
+                            if (entry.isIntersecting) {
+                                const img = entry.target;
+                                const src = img.getAttribute('data-src');
+                                if (src) {
+                                    img.src = src;
+                                    img.removeAttribute('data-src');
+                                    // 加载完成后淡入
+                                    img.onload = () => {
+                                        img.classList.add('loaded');
+                                    };
+                                    observer.unobserve(img);
+                                }
+                            }
+                        });
+                    }, { root: folderBrowser, rootMargin: '100px' });
+                }
+            }
+        }
+
+        // ==================== 交互优化：手势上拉加载 (修复无限加载Bug) ====================
+        function setupPullUpToLoad() {
+            const folderBrowser = document.getElementById('folderBrowser');
+            const hintEl = document.getElementById('pullUpHint');
+            if (!folderBrowser || !hintEl) return;
+            
+            const hintText = hintEl.querySelector('.text');
+            const hintIcon = hintEl.querySelector('.icon');
+            
+            let startY = 0;
+            let isDragging = false;
+            let isAtBottom = false;
+            const THRESHOLD = 60; // 触发阈值
+            const MAX_DRAG = 200; // 最大拖拽距离
+
+            folderBrowser.addEventListener('touchstart', (e) => {
+                const scrollTop = folderBrowser.scrollTop;
+                const scrollHeight = folderBrowser.scrollHeight;
+                const clientHeight = folderBrowser.clientHeight;
+                
+                // 只有确切滚动到底部（误差允许 2px）才允许触发上拉
+                if (scrollHeight - scrollTop - clientHeight <= 2) {
+                    isAtBottom = true;
+                    startY = e.touches[0].clientY;
+                } else {
+                    isAtBottom = false;
+                }
+            }, { passive: true });
+
+            folderBrowser.addEventListener('touchmove', (e) => {
+                // 如果正在加载，或者是没到底部，或者是已经标记为到底了，就不处理
+                if (!isAtBottom || isLoadingFolders) return;
+
+                const currentY = e.touches[0].clientY;
+                const deltaY = startY - currentY; 
+
+                // 只有向上拉 (deltaY > 0)
+                if (deltaY > 0) {
+                    isDragging = true;
+                    
+                    // 阻尼效果
+                    const moveDistance = Math.min(deltaY * 0.4, MAX_DRAG); 
+                    
+                    hintEl.style.height = `${moveDistance}px`;
+                    hintEl.style.opacity = Math.min(moveDistance / THRESHOLD, 1);
+
+                    // --- 关键修改：在这里就判断是否还有下一页，改变提示文字 ---
+                    if (currentPage >= totalPages) {
+                        hintText.textContent = "到底了 (松手回弹)";
+                        hintEl.classList.remove('rotate');
+                        // 如果已经到底，不允许拉太长，给用户一种"拉不动"的感觉
+                        if (moveDistance > 60) hintEl.style.height = '60px'; 
+                    } else {
+                        if (moveDistance > THRESHOLD) {
+                            hintText.textContent = "释放立即加载";
+                            hintEl.classList.add('rotate'); 
+                        } else {
+                            hintText.textContent = "上拉加载更多";
+                            hintEl.classList.remove('rotate');
+                        }
+                    }
+                }
+            }, { passive: true });
+
+            folderBrowser.addEventListener('touchend', async (e) => {
+                if (!isDragging) return;
+                
+                const currentHeight = parseFloat(hintEl.style.height || 0);
+                isDragging = false;
+                isAtBottom = false;
+
+                // --- 核心修复逻辑 ---
+                
+                // 1. 如果已经到达最后一页，或者已经是结束状态
+                if (currentPage >= totalPages || hasReachedEnd) {
+                    hintText.textContent = "没有更多了";
+                    // 保持一小会儿提示，然后收回
+                    setTimeout(() => {
+                        hintEl.style.height = '0';
+                        hintEl.style.opacity = '0';
+                    }, 800);
+                    return; // 【绝对停止执行】
+                }
+
+                // 2. 只有高度超过阈值时才处理
+                if (currentHeight > THRESHOLD) {
+                    // 判断是否还有下一页数据未加载
+                    const hasMorePages = currentPage < totalPages;
+                    
+                    if (hasMorePages) {
+                        // 情景 1：如果还有下一页，优先加载下一页，而不是跳转
+                        if (navigator.vibrate) navigator.vibrate(20); // 轻微震动反馈
+                        
+                        hintText.textContent = "加载下一页中...";
+                        hintEl.style.height = '40px'; 
+                        
+                        const nextPage = currentPage + 1;
+                        folderPageMap[currentFolderPath || ''] = nextPage;
+                        await loadFolders(currentFolderPath || '', nextPage, null, true);
+                    } else {
+                        // 情景 2：确实已经到底了（没有更多页），才允许跳转下一话
+                        if (navigator.vibrate) navigator.vibrate(50); // 强烈震动反馈
+                        hintText.textContent = "跳转下一话...";
+                        hintEl.style.height = '40px';
+                        // 跳转下一话
+                        jumpToSiblingFolder(1);
+                    }
+                } else {
+                    // 没有拉够距离，直接回弹
+                    hintEl.style.height = '0';
+                    hintEl.style.opacity = '0';
+                }
+                
+                hintEl.classList.remove('rotate');
+            });
+        }
+
+        // ==================== 核心逻辑：跳转兄弟文件夹 ====================
+        let isJumpingChapter = false;
+
+        async function jumpToSiblingFolder(direction) {
+            // direction: -1 (上一话), 1 (下一话)
+            if (!currentFolderPath || isJumpingChapter) return;
+            
+            // 获取当前文件夹的父路径
+            const parts = currentFolderPath.split('/').filter(p => p);
+            const currentFolderName = parts.pop(); // 取出当前文件夹名
+            const parentPath = parts.join('/'); // 剩下的就是父路径
+
+            isJumpingChapter = true;
+            showToast(direction === 1 ? "正在寻找下一话..." : "正在寻找上一话...");
+
+            try {
+                // 获取父目录列表以确定顺序
+                const [sortBy, order] = currentSort.split('-');
+                const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                // 获取列表（暂不分页以确保能找到相邻文件夹）
+                const url = `${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(parentPath)}&sort_by=${sortBy}&order=${order}&page=1&page_size=1000${comicDirParam}`;
+                
+                const response = await fetch(url);
+                const data = await response.json();
+
+                if (data.success && data.items) {
+                    const folders = data.items.filter(item => item.type === 'directory');
+                    const currentIndex = folders.findIndex(f => f.name === currentFolderName);
+                    
+                    if (currentIndex !== -1) {
+                        const targetIndex = currentIndex + direction;
+                        
+                        if (targetIndex >= 0 && targetIndex < folders.length) {
+                            const targetFolder = folders[targetIndex];
+                            showToast(`即将跳转: ${targetFolder.name}`);
+                            
+                            // 跳转前，不退出阅读模式，防止闪烁
+                            // 我们直接调用 navigateToFolder，它内部会处理
+                            await navigateToFolder(targetFolder.path);
+                            
+                        } else {
+                            showToast(direction === 1 ? "已经是最后一话了" : "已经是第一话了");
+                        }
+                    } else {
+                        showToast("无法定位当前章节");
+                    }
+                }
+            } catch (e) {
+                console.error(e);
+                showToast("跳转失败");
+            } finally {
+                isJumpingChapter = false;
+            }
+        }
+
+        // 简单提示工具
+        function showToast(msg) {
+            const toast = document.createElement('div');
+            toast.style.cssText = "position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); background:rgba(0,0,0,0.8); color:white; padding:12px 24px; border-radius:8px; z-index:3000; font-size:14px; transition: opacity 0.3s;";
+            toast.textContent = msg;
+            document.body.appendChild(toast);
+            setTimeout(() => {
+                toast.style.opacity = '0';
+                setTimeout(() => toast.remove(), 300);
+            }, 1500);
+        }
+
+        // ==================== 交互：长按跳转与底部上拉跳转 ====================
+        function setupImageViewerInteractions() {
+            const viewer = document.getElementById('imageViewer');
+            const overlay = document.getElementById('longPressOverlay');
+            if (!viewer || !overlay) return;
+            
+            const icon = overlay.querySelector('.icon');
+            const text = overlay.querySelector('.text');
+            
+            let touchTimer = null;
+            let touchStartX = 0;
+            let touchStartY = 0;
+            let isLongPress = false;
+            const LONG_PRESS_DELAY = 500; // 500ms 触发长按
+
+            let pullStartY = 0;
+            let isPullingUp = false;
+            let maxPullDistance = 0;
+
+            // --- 1. 触摸开始 ---
+            viewer.addEventListener('touchstart', (e) => {
+                if (e.touches.length !== 1) return;
+                
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                
+                // A. 长按检测初始化
+                const screenWidth = window.innerWidth;
+                let direction = 0; 
+                if (touchStartX < screenWidth * 0.25) direction = -1; // 左边 25%
+                else if (touchStartX > screenWidth * 0.75) direction = 1; // 右边 25%
+
+                if (direction !== 0) {
+                    touchTimer = setTimeout(() => {
+                        isLongPress = true;
+                        overlay.className = `long-press-overlay active ${direction === 1 ? 'long-press-right' : 'long-press-left'}`;
+                        icon.textContent = direction === 1 ? '⏭' : '⏮';
+                        text.textContent = direction === 1 ? '松手跳转下一话' : '松手跳转上一话';
+                        if (navigator.vibrate) navigator.vibrate(50);
+                    }, LONG_PRESS_DELAY);
+                }
+                
+                // B. 上拉检测初始化 (放宽判定条件：误差 10px)
+                const isAtBottom = Math.ceil(viewer.scrollTop) + viewer.clientHeight >= viewer.scrollHeight - 10;
+                if (isAtBottom) {
+                    isPullingUp = true;
+                    pullStartY = e.touches[0].clientY;
+                    maxPullDistance = 0;
+                } else {
+                    isPullingUp = false;
+                }
+            }, { passive: true });
+
+            // --- 2. 触摸移动 ---
+            viewer.addEventListener('touchmove', (e) => {
+                const currentX = e.touches[0].clientX;
+                const currentY = e.touches[0].clientY;
+
+                // A. 移动超过 10px 取消长按
+                if (Math.abs(currentX - touchStartX) > 10 || Math.abs(currentY - touchStartY) > 10) {
+                    clearTimeout(touchTimer);
+                    if (isLongPress) {
+                        overlay.className = 'long-press-overlay';
+                        isLongPress = false;
+                    }
+                }
+                
+                // B. 处理上拉动画
+                if (isPullingUp) {
+                    const deltaY = pullStartY - currentY; // 向上拉 deltaY > 0
+                    if (deltaY > 0) {
+                        maxPullDistance = deltaY;
+                        // 获取底部的提示元素 (它是在 renderAllImages 里动态生成的)
+                        const hintContainer = document.querySelector('.next-chapter-hint');
+                        const hintText = document.querySelector('.next-chapter-hint span');
+                        
+                        if (hintContainer && hintText) {
+                            // 阻尼移动
+                            const visualPull = Math.min(deltaY * 0.4, 150);
+                            hintContainer.style.transform = `translateY(-${visualPull}px)`;
+                            hintContainer.style.transition = 'none'; // 拖动时无过渡
+
+                            if (deltaY > 80) {
+                                hintText.textContent = "⬆️ 释放跳转下一话";
+                                hintText.style.color = "#667eea";
+                                hintText.style.fontWeight = "bold";
+                            } else {
+                                hintText.innerHTML = "继续上拉跳转下一话 <br> (或长按右侧区域)";
+                                hintText.style.color = "#666";
+                                hintText.style.fontWeight = "normal";
+                            }
+                        }
+                    }
+                }
+            }, { passive: true });
+
+            // --- 3. 触摸结束 ---
+            viewer.addEventListener('touchend', (e) => {
+                clearTimeout(touchTimer);
+                
+                // A. 触发长按跳转
+                if (isLongPress) {
+                    const screenWidth = window.innerWidth;
+                    if (touchStartX > screenWidth * 0.75) jumpToSiblingFolder(1);
+                    else if (touchStartX < screenWidth * 0.25) jumpToSiblingFolder(-1);
+                    
+                    overlay.className = 'long-press-overlay';
+                    isLongPress = false;
+                    e.preventDefault(); // 防止触发点击
+                    return;
+                }
+                
+                // B. 触发上拉跳转
+                if (isPullingUp) {
+                    isPullingUp = false;
+                    const hintContainer = document.querySelector('.next-chapter-hint');
+                    const hintText = document.querySelector('.next-chapter-hint span');
+                    
+                    // 样式回弹
+                    if (hintContainer) {
+                        hintContainer.style.transform = 'translateY(0)';
+                        hintContainer.style.transition = 'transform 0.3s ease';
+                    }
+                    if (hintText) {
+                        hintText.innerHTML = "继续上拉跳转下一话 <br> (或长按右侧区域)";
+                        hintText.style.color = "#666";
+                        hintText.style.fontWeight = "normal";
+                    }
+
+                    // 阈值判断
+                    if (maxPullDistance > 80) {
+                        // 只有当图片真的加载完了（或者当前是最后一页）才跳转
+                        // 由于我们在 loadFolderImages 中已经一次性加载了所有图片，这里直接跳转通常是没问题的。
+                        // 但为了逻辑严谨，确保不是在加载中
+                        if (!isLoadingImages) {
+                            if (navigator.vibrate) navigator.vibrate(50);
+                            jumpToSiblingFolder(1); // 下一话
+                        }
+                    }
+                }
+            });
+        }
+        // 更新文件夹面包屑
+        function updateFolderBreadcrumb(path) {
+            const breadcrumb = document.getElementById('folderBreadcrumb');
+            if (!path) {
+                breadcrumb.innerHTML = '<div class="breadcrumb-item"><span class="breadcrumb-current">📁 根目录</span></div>';
+                return;
+            }
+            
+            const parts = path.split('/').filter(p => p);
+            let html = '<div class="breadcrumb-item"><span class="breadcrumb-link" onclick="navigateToFolder(\'\')">📁 根目录</span></div>';
+            let current = '';
+            
+            parts.forEach((part, index) => {
+                current += (current ? '/' : '') + part;
+                const isLast = index === parts.length - 1;
+                // 路径转义（用于 JS 参数）
+                const jsPath = current.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+                // HTML 内容转义
+                const safeName = escapeHtml(part);
+                
+                html += `<div class="breadcrumb-item">`;
+                html += `<span class="breadcrumb-separator">›</span>`;
+                if (isLast) {
+                    html += `<span class="breadcrumb-current">${safeName}</span>`;
+                } else {
+                    html += `<span class="breadcrumb-link" onclick="navigateToFolder('${jsPath}')">${safeName}</span>`;
+                }
+                html += `</div>`;
+            });
+            
+            breadcrumb.innerHTML = html;
+        }
+
+        // 导航到文件夹
+        async function navigateToFolder(path, addToHistory = true) {
+            // ★★★ 核心：只要切目录，先退阅读器回到列表 ★★★
+            exitMobileReader();
+            
+            // 1. 立即清理旧的图片和加载任务（关键：防止返回上级后依旧加载）
+            if (path !== currentFolderPath) {
+                clearImageViewer(); 
+            }
+            
+            // --- History API 优化开始 ---
+            if (addToHistory && path !== currentFolderPath) {
+                const url = path ? `?folder=${encodeURIComponent(path)}` : window.location.pathname;
+                history.pushState({ folder: path }, '', url);
+            }
+            // --- History API 优化结束 ---
+            
+            currentFolderPath = path;
+            // 获取该路径保存的页码，如果没有则使用第一页
+            const savedPage = folderPageMap[path || ''] || 1;
+            currentPage = savedPage;
+            // 重置加载状态标志
+            hasReachedEnd = false; // 重置到底标志
+            totalPages = 1;        // 重置总页数，防止被上一个文件夹的总页数误导
+            consecutiveFailures = 0;
+            
+            // 如果是根目录，清空图片
+            if (!path) {
+                currentImages = [];
+                currentIndex = -1;
+                // 清空图片列表显示
+                const imageList = document.getElementById('imageList');
+                const imageListTitle = document.getElementById('imageListTitle');
+                imageList.classList.remove('has-images');
+                imageListTitle.style.display = 'none';
+                imageList.innerHTML = '';
+            }
+            
+            // 注意：这里不要再 push folderHistory 了，我们改用浏览器原生 History
+            // folderHistory.push(path); // 删除这行
+            
+            await loadFolders(path, savedPage);
+            // 只在非根目录时自动加载图片
+            if (path) {
+                await loadFolderImages(path);
+            }
+            updateNavButtons();
+        }
+        
+        // 重新加载当前文件夹（用于强制刷新）
+        async function reloadCurrentFolder() {
+            if (!currentFolderPath) {
+                await loadFolders('', currentPage);
+            } else {
+                await loadFolders(currentFolderPath);
+                if (currentImages.length > 0) {
+                    await loadFolderImages(currentFolderPath);
+                }
+            }
+        }
+
+        // 滚动到顶部
+        function scrollToTop(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            // 根据当前视图状态滚动正确的容器
+            if (document.body.classList.contains('mobile-reader-active')) {
+                // 移动端阅读器模式：滚动图片查看器
+                const imageViewer = document.getElementById('imageViewer');
+                if (imageViewer) {
+                    imageViewer.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            } else {
+                // 列表模式：滚动文件夹浏览器
+                const folderBrowser = document.getElementById('folderBrowser');
+                if (folderBrowser) {
+                    folderBrowser.scrollTo({ top: 0, behavior: 'smooth' });
+                }
+            }
+        }
+
+        // 返回上层文件夹
+        async function goToParentFolder(e) {
+            if (e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            if (!currentFolderPath) return;
+            
+            const parts = currentFolderPath.split('/').filter(p => p);
+            if (parts.length === 0) return;
+            
+            parts.pop();
+            const parentPath = parts.join('/');
+            await navigateToFolder(parentPath);
+            
+            // 滚动到文件夹浏览器顶部
+            const folderBrowser = document.getElementById('folderBrowser');
+            if (folderBrowser) {
+                folderBrowser.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+        
+        // 显示自定义弹窗
+        function showModal(title, message, buttons) {
+            const overlay = document.getElementById('modalOverlay');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalMessage = document.getElementById('modalMessage');
+            const modalButtons = document.getElementById('modalButtons');
+            
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            modalButtons.innerHTML = '';
+            
+            buttons.forEach(btn => {
+                const button = document.createElement('button');
+                button.className = `modal-btn ${btn.class || 'modal-btn-secondary'}`;
+                button.textContent = btn.text;
+                button.onclick = () => {
+                    overlay.classList.remove('show');
+                    if (btn.onClick) {
+                        btn.onClick();
+                    }
+                };
+                modalButtons.appendChild(button);
+            });
+            
+            overlay.classList.add('show');
+        }
+        
+        // 点击遮罩层关闭弹窗
+        function closeModalOnOverlay(event) {
+            if (event.target.id === 'modalOverlay') {
+                document.getElementById('modalOverlay').classList.remove('show');
+            }
+        }
+        
+        // 删除文件夹
+        async function deleteFolder(folderPath, folderName) {
+            showModal(
+                '确认删除',
+                `确定要删除文件夹 "${folderName}" 吗？\n\n此操作将永久删除文件夹及其所有内容，无法恢复！`,
+                [
+                    {
+                        text: '取消',
+                        class: 'modal-btn-secondary',
+                        onClick: null
+                    },
+                    {
+                        text: '确认删除',
+                        class: 'modal-btn-danger',
+                        onClick: async () => {
+                            try {
+                                const response = await fetch(`${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(folderPath)}`, {
+                                    method: 'DELETE'
+                                });
+                                
+                                const data = await response.json();
+                                
+                                if (response.ok && data.success) {
+                                    // 如果删除的是当前文件夹，返回上一级
+                                    if (currentFolderPath === folderPath || currentFolderPath.startsWith(folderPath + '/')) {
+                                        const parts = currentFolderPath.split('/').filter(p => p);
+                                        if (parts.length > 0 && parts[0] === folderPath.split('/')[0]) {
+                                            // 如果删除的是当前文件夹或其父文件夹，返回根目录
+                                            currentPage = 1;
+                                            await navigateToFolder('');
+                                        } else {
+                                            // 返回上一级
+                                            await goToParentFolder(null);
+                                        }
+                                    } else {
+                                        // 重新加载当前文件夹列表
+                                        if (!currentFolderPath) {
+                                            await loadFolders('', currentPage);
+                                        } else {
+                                            await loadFolders(currentFolderPath);
+                                        }
+                                    }
+                                } else {
+                                    showModal('删除失败', '删除操作失败，请稍后重试', [
+                                        { text: '确定', class: 'modal-btn-primary', onClick: null }
+                                    ]);
+                                }
+                            } catch (error) {
+                                showModal('删除失败', '删除操作失败，请稍后重试', [
+                                    { text: '确定', class: 'modal-btn-primary', onClick: null }
+                                ]);
+                                console.error('删除文件夹失败:', error);
+                            }
+                        }
+                    }
+                ]
+            );
+        }
+
+        // 更新导航按钮状态
+        function updateNavButtons() {
+            const goUpBtn = document.getElementById('goUpBtn');
+            const goRootBtn = document.getElementById('goRootBtn');
+            
+            // 返回顶部按钮始终可用
+            if (goUpBtn) {
+                goUpBtn.disabled = false;
+            }
+            // 返回上一层级按钮：在根目录时禁用（如果按钮存在）
+            if (goRootBtn) {
+                goRootBtn.disabled = !currentFolderPath;
+            }
+        }
+
+        // 加载文件夹中的图片
+        async function loadFolderImages(folderPath, cacheBuster = null) {
+            currentFolderPath = folderPath;
+            currentImages = [];
+            currentIndex = -1;
+            
+            const imageList = document.getElementById('imageList');
+            const imageListTitle = document.getElementById('imageListTitle');
+            
+            // 先隐藏图片列表和标题
+            imageList.classList.remove('has-images');
+            imageListTitle.style.display = 'none';
+            imageList.innerHTML = '';
+            
+            try {
+                // 添加强制刷新参数（绕过缓存）
+                const cacheParam = cacheBuster ? `&_t=${cacheBuster}` : '';
+                const comicDirParam = currentComicDir ? `&comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                // 看漫画时，默认按文件名升序排序
+                // 显式增加 &page=1&page_size=5000，确保加载完本话所有图片
+                const url = `${CONFIG.API_BASE_URL}/api/files?path=${encodeURIComponent(folderPath)}&sort_by=name&order=asc&page=1&page_size=5000${comicDirParam}${cacheParam}`;
+                
+                // 使用 no-cache 选项强制获取最新数据
+                const fetchOptions = cacheBuster ? {
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                } : {};
+                
+                const response = await fetch(url, fetchOptions);
+                const data = await response.json();
+                
+                if (data.success && data.items) {
+                    // 过滤出图片文件（后端已按文件名排序，这里只需要过滤）
+                    currentImages = data.items
+                        .filter(item => {
+                            // 跳过目录
+                            if (item.type === 'directory') return false;
+                            // 提取文件扩展名
+                            const lastDotIndex = item.name.lastIndexOf('.');
+                            if (lastDotIndex === -1 || lastDotIndex === item.name.length - 1) {
+                                return false;
+                            }
+                            const ext = item.name.toLowerCase().substring(lastDotIndex);
+                            return CONFIG.IMAGE_EXTENSIONS.includes(ext);
+                        });
+                    
+                    if (currentImages.length > 0 && folderPath) {
+                        // 只在有图片且不是根目录时渲染
+                        renderImageList();
+                        renderAllImages();
+                        currentIndex = 0;
+                        showImage(0);
+                        // ★★★ 核心：有图片，移动端自动切到阅读器 ★★★
+                        enterMobileReader();
+                    } else {
+                        // 没有图片时，完全隐藏，不显示任何内容
+                        clearImageViewer();
+                        // 没图片，留在列表页
+                        exitMobileReader();
+                    }
+                }
+            } catch (error) {
+                // 加载失败时也隐藏
+                console.error('加载图片失败:', error);
+                clearImageViewer();
+            }
+        }
+
+        // 渲染图片列表
+        function renderImageList() {
+            const imageList = document.getElementById('imageList');
+            const imageListTitle = document.getElementById('imageListTitle');
+            
+            if (currentImages.length === 0) {
+                imageList.classList.remove('has-images');
+                imageListTitle.style.display = 'none';
+                return;
+            }
+            
+            imageList.classList.add('has-images');
+            imageListTitle.style.display = 'block';
+            imageList.innerHTML = '';
+            
+            currentImages.forEach((image, index) => {
+                const item = document.createElement('div');
+                item.className = 'image-item';
+                if (index === currentIndex) {
+                    item.classList.add('active');
+                }
+                item.onclick = () => showImage(index);
+                item.title = image.name; // 保留标题提示
+                
+                const img = document.createElement('img');
+                const comicDirParam = currentComicDir ? `?comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                img.src = `${CONFIG.API_BASE_URL}/api/image/${encodeURIComponent(image.path)}${comicDirParam}`;
+                img.alt = image.name;
+                img.loading = 'lazy';
+                
+                item.appendChild(img);
+                imageList.appendChild(item);
+            });
+        }
+
+        // 显示特定图片（点击侧边栏跳转）
+        function showImage(index) {
+            if (index < 0 || index >= currentImages.length) return;
+            
+            currentIndex = index;
+            const imageWrapper = document.getElementById('imageWrapper');
+            
+            // 如果 DOM 为空（比如刚从根目录进来），先渲染占位符
+            if (imageWrapper.children.length === 0) {
+                renderAllImages();
+            }
+            
+            // 找到对应的图片元素
+            const targetImg = imageWrapper.querySelector(`img[data-index="${index}"]`);
+            
+            if (targetImg) {
+                // 滚动到该图片
+                targetImg.scrollIntoView({ behavior: 'auto', block: 'start' });
+                
+                // 强制立即加载当前图片（不需要等观察器触发，提升响应速度）
+                const realSrc = targetImg.getAttribute('data-src');
+                if (realSrc) {
+                    // 解除观察
+                    if (mainImageObserver) mainImageObserver.unobserve(targetImg);
+                    
+                    // 开始加载
+                    targetImg.src = realSrc;
+                    targetImg.removeAttribute('data-src');
+                    
+                    // 检查图片是否已经在缓存中
+                    if (targetImg.complete && targetImg.naturalHeight !== 0) {
+                        // 图片已经在缓存中，立即显示
+                        targetImg.classList.add('loaded');
+                    } else {
+                        // 等待加载完成
+                        targetImg.onload = () => {
+                            targetImg.classList.add('loaded');
+                        };
+                        // 加载失败处理
+                        targetImg.onerror = () => {
+                            targetImg.style.display = 'none';
+                            console.error('图片加载失败:', realSrc);
+                        };
+                    }
+                }
+            }
+            
+            updateUI();
+            renderImageList();
+        }
+        
+        // 渲染所有图片（分批按顺序加载）
+        function renderAllImages() {
+            const imageWrapper = document.getElementById('imageWrapper');
+            const loadingText = document.getElementById('loadingText');
+            
+            // 如果当前不在图片文件夹或没有图片，不渲染
+            if (!currentFolderPath || currentImages.length === 0) {
+                if (imageWrapper) {
+                    imageWrapper.innerHTML = '';
+                }
+                if (loadingText) {
+                    loadingText.textContent = '请从左侧选择图片';
+                    loadingText.style.display = 'block';
+                }
+                return;
+            }
+            
+            // 1. 基础清理
+            if (imageWrapper) imageWrapper.innerHTML = '';
+            if (loadingText) loadingText.style.display = 'none';
+
+            // 2. 检查是否有图
+            if (!currentFolderPath || currentImages.length === 0) {
+                if (loadingText) {
+                    loadingText.textContent = '此文件夹没有图片';
+                    loadingText.style.display = 'block';
+                }
+                return;
+            }
+
+            // 3. 确保观察器已初始化
+            initImageObserver();
+            
+            // ★★★ 新增：启动页码计数器 ★★★
+            initPageCounterObserver();
+
+            // 4. 生成 DOM 节点
+            const fragment = document.createDocumentFragment(); // 使用文档片段优化性能
+            
+            currentImages.forEach((image, index) => {
+                const img = document.createElement('img');
+                
+                // 构建真实 URL
+                const comicDirParam = currentComicDir ? `?comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                const realUrl = `${CONFIG.API_BASE_URL}/api/image/${encodeURIComponent(image.path)}${comicDirParam}`;
+
+                // 设置属性
+                img.alt = image.name;
+                img.dataset.index = index;
+                
+                // 关键：将真实地址放在 data-src 中
+                img.setAttribute('data-src', realUrl);
+                
+                // 设置一个透明像素作为初始 src，防止浏览器显示 broken image 图标
+                img.src = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+                // 错误处理
+                img.onerror = () => {
+                    img.style.display = 'none';
+                    console.error('图片加载失败:', realUrl);
+                };
+                
+                // 加入观察队列
+                if (mainImageObserver) {
+                    mainImageObserver.observe(img);
+                } else {
+                    // 降级处理：如果没有观察器，直接加载
+                    img.src = realUrl;
+                    img.onload = () => {
+                        img.classList.add('loaded');
+                    };
+                }
+                
+                // ★★★ 新增：加入页码计数观察器 ★★★
+                if (pageCounterObserver) {
+                    pageCounterObserver.observe(img);
+                }
+                
+                fragment.appendChild(img);
+            });
+
+            // === 新增：添加底部提示条 ===
+            const endHint = document.createElement('div');
+            endHint.className = 'next-chapter-hint';
+            endHint.style.display = 'block'; // 显示出来
+            endHint.style.padding = '40px 0';
+            endHint.innerHTML = '<span>继续上拉跳转下一话 <br> (或长按右侧区域)</span>';
+            fragment.appendChild(endHint);
+            // === 结束新增 ===
+
+            imageWrapper.appendChild(fragment);
+            
+            // 5. 更新 UI 计数器
+            updateUI();
+        }
+        
+        // 开始按顺序加载图片
+        function startLoadingImages() {
+            if (isLoadingImages || imageLoadQueue.length > 0) {
+                return; // 已经在加载中
+            }
+            
+            isLoadingImages = true;
+            
+            // 确定优先加载的图片索引（当前图片及其附近）
+            const priorityIndices = new Set();
+            if (currentIndex >= 0) {
+                const start = Math.max(0, currentIndex - PRELOAD_RANGE);
+                const end = Math.min(currentImages.length - 1, currentIndex + PRELOAD_RANGE);
+                for (let i = start; i <= end; i++) {
+                    priorityIndices.add(i);
+                }
+            }
+            
+            // 构建加载队列：优先加载当前附近的图片，然后按顺序加载其他图片
+            const allIndices = [];
+            for (let i = 0; i < currentImages.length; i++) {
+                if (priorityIndices.has(i)) {
+                    allIndices.unshift(i); // 优先图片放在前面
+                } else {
+                    allIndices.push(i);
+                }
+            }
+            
+            // 移除重复（如果当前索引在优先列表中）
+            const uniqueIndices = [];
+            const seen = new Set();
+            for (const idx of allIndices) {
+                if (!seen.has(idx)) {
+                    seen.add(idx);
+                    uniqueIndices.push(idx);
+                }
+            }
+            
+            imageLoadQueue = uniqueIndices;
+            loadNextBatch();
+        }
+        
+        // 加载下一批图片
+        function loadNextBatch() {
+            if (imageLoadQueue.length === 0) {
+                isLoadingImages = false;
+                return;
+            }
+            
+            // 取出一批图片索引
+            const batch = imageLoadQueue.splice(0, BATCH_SIZE);
+            const imageWrapper = document.getElementById('imageWrapper');
+            
+            batch.forEach((index) => {
+                const img = imageWrapper.querySelector(`img[data-index="${index}"]`);
+                if (img && img.dataset.loaded === 'false') {
+                    const image = currentImages[index];
+                    const comicDirParam = currentComicDir ? `?comic_dir=${encodeURIComponent(currentComicDir)}` : '';
+                    img.src = `${CONFIG.API_BASE_URL}/api/image/${encodeURIComponent(image.path)}${comicDirParam}`;
+                }
+            });
+            
+            // 等待当前批次加载完成后再加载下一批（给一点延迟避免同时发起太多请求）
+            setTimeout(() => {
+                loadNextBatch();
+            }, 200); // 每批之间延迟200ms
+        }
+
+        // 更新UI状态
+        function updateUI() {
+            const counter = document.getElementById('imageCounter');
+            counter.textContent = `${currentIndex + 1} / ${currentImages.length}`;
+        }
+
+        // 清空图片查看器
+        // 清空图片查看器并停止后台加载
+        function clearImageViewer() {
+            const imageWrapper = document.getElementById('imageWrapper');
+            const loadingText = document.getElementById('loadingText');
+            
+            // 1. 关键：断开观察器，停止触发新的网络请求
+            if (mainImageObserver) {
+                mainImageObserver.disconnect();
+                mainImageObserver = null;
+            }
+            
+            // 断开页码计数器观察器
+            if (pageCounterObserver) {
+                pageCounterObserver.disconnect();
+                pageCounterObserver = null;
+            }
+
+            // 2. 停止可能存在的旧式加载队列（兼容旧代码）
+            isLoadingImages = false;
+            imageLoadQueue = [];
+
+            // 3. 清空 DOM
+            if (imageWrapper) {
+                // 将 innerHTML 清空可以立即停止浏览器对未完成图片的渲染尝试
+                imageWrapper.innerHTML = '';
+            }
+            
+            // 4. 重置提示文字
+            if (loadingText) {
+                loadingText.textContent = '请从左侧选择图片';
+                loadingText.style.display = 'block';
+            }
+            
+            // 5. 重置计数
+            const counter = document.getElementById('imageCounter');
+            if (counter) counter.textContent = '0 / 0';
+        }
+
+        // 切换侧边栏
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const navButtons = document.getElementById('navButtons');
+            sidebar.classList.toggle('hidden');
+            // 当侧边栏隐藏时，导航按钮也隐藏
+            if (sidebar.classList.contains('hidden')) {
+                navButtons.classList.add('hidden');
+            } else {
+                navButtons.classList.remove('hidden');
+            }
+        }
+
+        // 全屏
+        function toggleFullscreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen();
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        // 返回首页（index界面）
+        function goToIndex() {
+            // 返回首页，保持API地址参数
+            const urlParams = new URLSearchParams(window.location.search);
+            const apiParam = urlParams.get('api');
+            if (apiParam) {
+                window.location.href = `index.html?api=${encodeURIComponent(apiParam)}`;
+            } else {
+                window.location.href = 'index.html';
+            }
+        }
+        
+        // 回到根目录
+        // 返回上一层级
+        async function goToParent() {
+            // 如果当前在根目录，无法返回上一层级
+            if (!currentFolderPath) {
+                return;
+            }
+            
+            // 获取上一层级路径
+            const pathParts = currentFolderPath.split('/').filter(p => p);
+            if (pathParts.length === 0) {
+                // 已经在根目录
+                return;
+            }
+            
+            // 移除最后一级
+            pathParts.pop();
+            const parentPath = pathParts.join('/');
+            
+            // 导航到上一层级
+            await navigateToFolder(parentPath);
+        }
+        
+        async function goToRoot() {
+            currentFolderPath = '';
+            currentPage = 1;
+            // 清空图片列表
+            currentImages = [];
+            currentIndex = -1;
+            
+            // 清空图片列表显示
+            const imageList = document.getElementById('imageList');
+            const imageListTitle = document.getElementById('imageListTitle');
+            imageList.classList.remove('has-images');
+            imageListTitle.style.display = 'none';
+            imageList.innerHTML = '';
+            
+            // 清空主视图
+            clearImageViewer();
+            
+            // 重新加载文件夹列表
+            await loadFolders('', 1);
+            updateNavButtons();
+        }
+        
+        // 强制刷新清除缓存
+        async function forceRefresh() {
+            try {
+                // 显示加载提示
+                const folderList = document.getElementById('folderList');
+                if (folderList) {
+                    folderList.innerHTML = '<div class="loading">正在清除缓存并刷新...</div>';
+                }
+                
+                // 清除后端缓存
+                const clearResponse = await fetch(`${CONFIG.API_BASE_URL}/api/cache/clear`, {
+                    method: 'POST',
+                    cache: 'no-cache',
+                    headers: {
+                        'Cache-Control': 'no-cache',
+                        'Pragma': 'no-cache'
+                    }
+                });
+                
+                // 等待一小段时间确保缓存清除完成
+                await new Promise(resolve => setTimeout(resolve, 100));
+                
+                // 生成时间戳用于绕过所有缓存（包括浏览器缓存）
+                const timestamp = Date.now();
+                
+                // 重新加载当前文件夹列表（添加时间戳参数绕过缓存）
+                if (!currentFolderPath) {
+                    // 根目录：重新加载当前页
+                    await loadFolders('', currentPage, timestamp);
+                } else {
+                    // 子目录：重新加载文件夹和图片
+                    await loadFolders(currentFolderPath, undefined, timestamp);
+                    // 如果当前有图片，也重新加载
+                    if (currentImages.length > 0) {
+                        await loadFolderImages(currentFolderPath, timestamp);
+                    }
+                }
+            } catch (error) {
+                console.error('清除缓存失败:', error);
+                // 失败时直接刷新页面
+                window.location.reload();
+            }
+        }
+
+        
+        // 键盘快捷键
+        function setupKeyboard() {
+            document.addEventListener('keydown', (e) => {
+                if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+                
+                switch(e.key) {
+                    case 'Escape':
+                        if (document.fullscreenElement) {
+                            document.exitFullscreen();
+                        } else if (currentFolderPath) {
+                            // 按 ESC 返回上一级
+                            goToParent();
+                        }
+                        break;
+                    case 'f':
+                    case 'F':
+                        toggleFullscreen();
+                        break;
+                    
+                    // 新增：方向键控制
+                    case 'ArrowRight':
+                    case 'ArrowDown':
+                        // 向下/向右滚动一小段，或者跳转到下一张图
+                        // 如果是滚动模式，建议直接用 scrollBy
+                        e.preventDefault();
+                        scrollImageViewer(1); 
+                        break;
+                    case 'ArrowLeft':
+                    case 'ArrowUp':
+                        e.preventDefault();
+                        scrollImageViewer(-1);
+                        break;
+                    
+                    // 新增：Home/End
+                    case 'Home':
+                        e.preventDefault();
+                        scrollToTop();
+                        break;
+                }
+            });
+        }
+        
+        // 辅助函数：键盘滚动图片视图
+        function scrollImageViewer(direction) {
+            const viewer = document.getElementById('imageViewer');
+            if (!viewer) return;
+            
+            // 每次滚动半个屏幕高度
+            const scrollAmount = window.innerHeight * 0.5 * direction;
+            viewer.scrollBy({ top: scrollAmount, behavior: 'smooth' });
+        }
+
+        // 页面加载时初始化
+        window.addEventListener('load', init);
+    </script>
+</body>
+</html>
+
+

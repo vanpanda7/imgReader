@@ -1,0 +1,5 @@
+dir_rule:
+  base_dir: /mnt/nas/home/hub/漫画/JM/
+download:
+  image:
+    suffix: .webp
