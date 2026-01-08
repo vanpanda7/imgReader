@@ -94,43 +94,41 @@
             transform: scale(0.95);
         }
 
-        /* 源切换选项卡容器 */
+        /* 源切换 Tabs */
         .source-tabs {
             display: flex;
             padding: 10px 15px;
-            background: #1a1a1a;
-            border-bottom: 1px solid #3a3a3a;
-            gap: 10px;
-            overflow-x: auto; /* 防止源太多时溢出 */
+            background: #222; /* 比背景稍亮 */
+            border-bottom: 1px solid #333;
+            gap: 12px;
+            overflow-x: auto;
         }
 
-        /* 选项卡按钮 */
         .tab-btn {
-            flex: 1; /* 平均分配宽度 */
-            background: #2a2a2a;
-            border: 1px solid #3a3a3a;
-            color: #aaa;
+            flex: 1;
             padding: 8px 0;
-            border-radius: 6px;
+            border-radius: 8px;
+            background: #333;
+            color: #888;
+            border: 1px solid transparent;
             font-size: 14px;
-            font-weight: 500;
+            font-weight: bold;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s ease;
             text-align: center;
             white-space: nowrap;
         }
 
-        .tab-btn:hover {
-            background: #333;
+        /* 激活状态：高亮显示 */
+        .tab-btn.active {
+            background: #667eea;
             color: #fff;
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+            transform: translateY(-1px);
         }
 
-        /* 激活状态 */
-        .tab-btn.active {
-            background: #667eea; /* 激活色 */
-            color: #fff;
-            border-color: #667eea;
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        .tab-btn:active {
+            transform: scale(0.96);
         }
 
         .sidebar-section-title {
@@ -498,9 +496,17 @@
 
         .folder-list {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-            gap: 8px;
-            padding: 10px;
+            /* 每行显示4个文件夹 */
+            grid-template-columns: repeat(4, 1fr); 
+            gap: 12px;
+            padding: 12px;
+        }
+        
+        /* 响应式：小屏幕时自动调整 */
+        @media (max-width: 768px) {
+            .folder-list {
+                grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            }
         }
 
         .folder-item {
@@ -556,16 +562,19 @@
 
         .folder-thumbnail {
             width: 100%;
-            aspect-ratio: 1;
+            /* 改为竖向比例，更适合漫画封面 */
+            aspect-ratio: 2 / 3; 
             border-radius: 4px;
             object-fit: cover;
-            margin-bottom: 5px;
+            margin-bottom: 6px;
             background: #1a1a1a;
             image-rendering: -webkit-optimize-contrast;
             image-rendering: crisp-edges;
             display: block; /* 改为 block，通过 opacity 控制显示 */
             opacity: 0;
             transition: opacity 0.3s;
+            /* 加点阴影更有质感 */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
             /* 防止图片被选中 */
             user-select: none;
             -webkit-user-select: none;
@@ -590,8 +599,8 @@
             top: 8px; /* 与 padding 对齐 */
             left: 8px;
             right: 8px;
-            /* 缩略图是正方形（aspect-ratio: 1），宽度100%，所以高度等于宽度 */
-            aspect-ratio: 1;
+            /* 缩略图是竖向比例（aspect-ratio: 2/3） */
+            aspect-ratio: 2 / 3;
             border-radius: 4px;
             background: transparent;
             z-index: 1;
@@ -601,6 +610,27 @@
             -webkit-user-select: none;
             -moz-user-select: none;
             -ms-user-select: none;
+        }
+
+        /* 进度条样式 */
+        .progress-bar-bg {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 4px;
+            background: rgba(0,0,0,0.5);
+            border-radius: 0 0 6px 6px;
+        }
+        .progress-bar-fill {
+            height: 100%;
+            background: #667eea;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        /* 已读完的变绿 */
+        .progress-bar-fill.finished { 
+            background: #48bb78; 
         }
 
         .folder-name {
@@ -614,22 +644,24 @@
 
         .folder-icon {
             width: 100%;
-            aspect-ratio: 1;
+            aspect-ratio: 2 / 3;
             display: flex;
             align-items: center;
             justify-content: center;
             font-size: 32px;
-            margin-bottom: 5px;
+            margin-bottom: 6px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         
         .folder-loading {
             width: 100%;
-            aspect-ratio: 1;
+            aspect-ratio: 2 / 3;
             display: flex;
             align-items: center;
             justify-content: center;
-            margin-bottom: 5px;
+            margin-bottom: 6px;
             position: relative;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         
         .folder-loading-spinner {
@@ -1143,6 +1175,29 @@
         let totalFolders = 0; // 总文件夹数
         let totalPages = 1; // 总页数
         let currentComicDir = localStorage.getItem('selectedComicDir') || 'JM'; // 当前选择的漫画目录（从 localStorage 读取或默认 JM）
+
+        // ==================== 本地进度管理器 ====================
+        const ProgressMgr = {
+            save: (path, pageIndex, total) => {
+                const history = JSON.parse(localStorage.getItem('reading_history') || '{}');
+                history[path] = {
+                    page: pageIndex,
+                    total: total,
+                    timestamp: Date.now()
+                };
+                // 简单清理：只保留最近 500 条
+                const keys = Object.keys(history);
+                if (keys.length > 500) {
+                    delete history[keys.sort((a,b) => history[a].timestamp - history[b].timestamp)[0]];
+                }
+                localStorage.setItem('reading_history', JSON.stringify(history));
+            },
+            
+            get: (path) => {
+                const history = JSON.parse(localStorage.getItem('reading_history') || '{}');
+                return history[path];
+            }
+        };
         let imageLoadQueue = []; // 图片加载队列
         let isLoadingImages = false; // 是否正在加载图片
         let loadedImageCount = 0; // 已加载的图片数量
@@ -1621,6 +1676,21 @@
                             const jsName = folder.name.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
                             const uniqueId = `folder-${Date.now()}-${existingCount + index}`;
                             
+                            // 获取进度
+                            const progress = ProgressMgr.get(folder.path);
+                            let progressHtml = '';
+
+                            if (progress) {
+                                const percent = Math.min(100, Math.round(((progress.page + 1) / progress.total) * 100));
+                                const isFinished = percent > 95; // 超过95%算读完
+                                
+                                progressHtml = `
+                                    <div class="progress-bar-bg">
+                                        <div class="progress-bar-fill ${isFinished ? 'finished' : ''}" style="width: ${percent}%"></div>
+                                    </div>
+                                `;
+                            }
+                            
                             html += `
                                 <div class="folder-item" onclick="navigateToFolder('${jsPath}')" title="${safeName}" data-folder-index="${existingCount + index}">
                                     <button class="folder-delete-btn" onclick="event.stopPropagation(); deleteFolder('${jsPath}', '${jsName}')" title="删除文件夹">×</button>
@@ -1629,6 +1699,7 @@
                                     </div>
                                     <div class="folder-icon" id="icon-${uniqueId}" style="display: none;">📁</div>
                                     <div class="folder-name">${safeName}</div>
+                                    ${progressHtml}
                                 </div>
                             `;
                         });
@@ -2573,6 +2644,17 @@
                         showImage(0);
                         // ★★★ 核心：有图片，移动端自动切到阅读器 ★★★
                         enterMobileReader();
+                        
+                        // ★★★ 新增：恢复进度 ★★★
+                        const saved = ProgressMgr.get(folderPath);
+                        // 如果有记录，且记录的页码不是第一页
+                        if (saved && saved.page > 0 && saved.page < currentImages.length) {
+                            showToast(`恢复上次阅读：第 ${saved.page + 1} 页`);
+                            // 延迟跳转，等待布局稳定
+                            setTimeout(() => {
+                                showImage(saved.page);
+                            }, 100);
+                        }
                     } else {
                         // 没有图片时，完全隐藏，不显示任何内容
                         clearImageViewer();
@@ -2841,6 +2923,11 @@
         function updateUI() {
             const counter = document.getElementById('imageCounter');
             counter.textContent = `${currentIndex + 1} / ${currentImages.length}`;
+            
+            // ★★★ 新增：保存进度 ★★★
+            if (currentFolderPath && currentImages.length > 0) {
+                ProgressMgr.save(currentFolderPath, currentIndex, currentImages.length);
+            }
         }
 
         // 清空图片查看器
@@ -3063,5 +3150,6 @@
     </script>
 </body>
 </html>
+
 
 
