@@ -494,21 +494,25 @@
             display: inline-block;
         }
 
-        /* 文件夹列表布局 */
         .folder-list {
             display: grid;
-            /* 强制每行 4 列 */
-            grid-template-columns: repeat(4, 1fr);
-            /* 紧凑间距 */
-            gap: 5px;
-            padding: 8px;
+            /* 每行显示4个文件夹 */
+            grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); 
+            gap: 12px;
+            padding: 12px;
+        }
+        
+        /* 响应式：小屏幕时自动调整 */
+        @media (max-width: 768px) {
+            .folder-list {
+                grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+            }
         }
 
-        /* 文件夹卡片样式 */
         .folder-item {
             background: #2a2a2a;
             border-radius: 6px;
-            padding: 5px; /* 紧凑内边距 */
+            padding: 0px;
             cursor: pointer;
             transition: all 0.2s;
             border: 2px solid transparent;
@@ -518,7 +522,7 @@
 
         .folder-item:hover {
             background: #3a3a3a;
-            border-color: #667eea; /* hover 时也显示边框，增强反馈 */
+            border-color: #667eea;
         }
 
         .folder-item.active {
@@ -556,25 +560,21 @@
             transform: scale(1.1);
         }
 
-        /* 封面、图标、Loading 统一比例调整 */
-        .folder-thumbnail, 
-        .folder-icon, 
-        .folder-loading {
-            width: 100%;
-            /* 竖向比例，适合漫画 */
-            aspect-ratio: 3 / 4; 
-            object-fit: cover;
-            border-radius: 3px;
-            margin-bottom: 4px;
-            background: #222;
-        }
-        
         .folder-thumbnail {
+            width: 100%;
+            /* 改为竖向比例，更适合漫画封面 */
+            aspect-ratio: 2 / 3; 
+            border-radius: 4px;
+            object-fit: cover;
+            margin-bottom: 6px;
+            background: #1a1a1a;
             image-rendering: -webkit-optimize-contrast;
             image-rendering: crisp-edges;
             display: block; /* 改为 block，通过 opacity 控制显示 */
             opacity: 0;
             transition: opacity 0.3s;
+            /* 加点阴影更有质感 */
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
             /* 防止图片被选中 */
             user-select: none;
             -webkit-user-select: none;
@@ -596,12 +596,12 @@
         .folder-item::before {
             content: '';
             position: absolute;
-            top: 5px; /* 与 padding 对齐 */
-            left: 5px;
-            right: 5px;
-            /* 缩略图是竖向比例（aspect-ratio: 3/4） */
-            aspect-ratio: 3 / 4;
-            border-radius: 3px;
+            top: 8px; /* 与 padding 对齐 */
+            left: 8px;
+            right: 8px;
+            /* 缩略图是竖向比例（aspect-ratio: 2/3） */
+            aspect-ratio: 2 / 3;
+            border-radius: 4px;
             background: transparent;
             z-index: 1;
             pointer-events: none; /* 遮罩层不阻挡点击事件 */
@@ -633,30 +633,35 @@
             background: #48bb78; 
         }
 
-        /* 默认文件夹图标大小调整 */
-        .folder-icon {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 24px;
-        }
-
-        /* 文件夹名称微调 */
         .folder-name {
             font-size: 10px;
-            color: #ccc;
+            color: #aaa;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
             line-height: 1.2;
-            padding: 0 2px;
         }
-        
-        .folder-loading {
+
+        .folder-icon {
+            width: 100%;
+            aspect-ratio: 2 / 3;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 32px;
+            margin-bottom: 6px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        .folder-loading {
+            width: 100%;
+            aspect-ratio: 2 / 3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 6px;
             position: relative;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
         }
         
         .folder-loading-spinner {
