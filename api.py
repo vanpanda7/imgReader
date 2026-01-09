@@ -27,10 +27,13 @@ from PIL import Image
 # 引入异步 Redis (替代同步 redis)
 try:
     from redis import asyncio as aioredis
+    import redis  # 同步 Redis 客户端，用于 worker 线程
     AIOREDIS_AVAILABLE = True
+    SYNC_REDIS_AVAILABLE = True
 except ImportError:
     AIOREDIS_AVAILABLE = False
-    print("⚠ aioredis 未安装，将使用内存缓存。请运行: pip install redis>=4.2.0")
+    SYNC_REDIS_AVAILABLE = False
+    print("⚠ redis 未安装，将使用内存缓存。请运行: pip install redis>=4.2.0")
 
 # 引入项目依赖
 # 将 src 目录添加到 Python 路径，以便导入 jmcomic 模块
@@ -61,6 +64,91 @@ import os
 cpu_count = os.cpu_count() or 4
 image_executor = ThreadPoolExecutor(max_workers=min(cpu_count, 4), thread_name_prefix="img_worker")
 print(f"✓ 图片处理线程池已创建 (工作线程数: {min(cpu_count, 4)})")
+
+# ==================== Redis 下载状态管理 ====================
+
+# 同步 Redis 客户端（用于 worker 线程）
+_sync_redis_client = None
+
+def get_sync_redis_client():
+    """获取同步 Redis 客户端（用于 worker 线程）"""
+    global _sync_redis_client
+    if _sync_redis_client is None and SYNC_REDIS_AVAILABLE and REDIS_CONFIG:
+        try:
+            _sync_redis_client = redis.Redis(
+                host=REDIS_CONFIG.get('host', 'localhost'),
+                port=REDIS_CONFIG.get('port', 6379),
+                password=REDIS_CONFIG.get('password'),
+                db=REDIS_CONFIG.get('db', 0),
+                decode_responses=False  # 保持为 bytes
+            )
+            _sync_redis_client.ping()  # 测试连接
+            print("✓ 同步 Redis 客户端已创建（用于 worker 线程）")
+        except Exception as e:
+            print(f"⚠ 同步 Redis 客户端创建失败: {e}")
+            _sync_redis_client = None
+    return _sync_redis_client
+
+def get_download_status_key(album_id: str) -> str:
+    """获取下载状态的 Redis 键"""
+    return f"jmcomic:download:{album_id}"
+
+async def init_download_status(album_id: str, total: int):
+    """初始化下载状态到 Redis Hash"""
+    key = get_download_status_key(album_id)
+    await cache_service._ensure_redis()
+    
+    if cache_service.redis:
+        try:
+            await cache_service.redis.hset(key, mapping={
+                b"total": str(total).encode(),
+                b"current": b"0",
+                b"status": b"downloading",
+                b"updated_at": str(int(time.time())).encode()
+            })
+            # 设置过期时间（24小时）
+            await cache_service.redis.expire(key, 86400)
+        except Exception as e:
+            print(f"⚠ 初始化下载状态失败: {e}")
+
+async def get_download_status(album_id: str) -> Dict[str, Any]:
+    """从 Redis 获取下载状态"""
+    key = get_download_status_key(album_id)
+    await cache_service._ensure_redis()
+    
+    if cache_service.redis:
+        try:
+            data = await cache_service.redis.hgetall(key)
+            if data:
+                total = int(data.get(b'total', b'0'))
+                current = int(data.get(b'current', b'0'))
+                status = data.get(b'status', b'unknown').decode('utf-8')
+                return {
+                    "status": status,
+                    "total": total,
+                    "current": current
+                }
+        except Exception as e:
+            print(f"⚠ 获取下载状态失败: {e}")
+    
+    return {"status": "unknown", "current": 0, "total": 0}
+
+def increment_download_progress(album_id: str) -> Optional[int]:
+    """原子递增下载进度（在 worker 线程中调用）"""
+    key = get_download_status_key(album_id)
+    sync_redis = get_sync_redis_client()
+    
+    if sync_redis:
+        try:
+            # 使用 HINCRBY 原子递增（Redis 会自动处理字符串到数字的转换）
+            new_current = sync_redis.hincrby(key, "current", 1)
+            # 更新 updated_at
+            sync_redis.hset(key, "updated_at", str(int(time.time())))
+            return new_current
+        except Exception as e:
+            print(f"⚠ 递增下载进度失败: {e}")
+    
+    return None
 
 # ==================== 进度管理器 ====================
 
@@ -560,31 +648,46 @@ class ConnectionManager:
 connection_manager = ConnectionManager()
 
 class ProgressTrackingDownloader(JmDownloader):
-    """自定义下载器，使用原子计数器跟踪进度"""
-    def __init__(self, option, album_id: str, progress_mgr: ProgressManager, download_manager: 'DownloadManager'):
+    """自定义下载器，使用 Redis HINCRBY 原子递增跟踪进度"""
+    def __init__(self, option, album_id: str, total_images: int, download_manager: 'DownloadManager'):
         super().__init__(option)
         self.album_id = album_id
-        self.progress_mgr = progress_mgr
+        self.total_images = total_images
         self.download_manager = download_manager
+        self.last_update_time = 0
+        self.update_interval = 0.5  # 防抖间隔：0.5秒
     
     def after_image(self, image: JmImageDetail, img_save_path):
         """每张图片下载完成后的回调"""
         # 调用父类方法（用于日志记录等）
         super().after_image(image, img_save_path)
         
-        # 原子计数器增加
-        curr, percent = self.progress_mgr.increment_and_get()
+        # ★★★ 核心修复：使用 Redis HINCRBY 原子递增 ★★★
+        # 无论哪个线程先下完，Redis 里的 current 永远 +1
+        new_current = increment_download_progress(self.album_id)
         
-        # 防抖：只在需要时更新 Redis 和推送进度
-        if self.progress_mgr.should_update_redis():
-            progress_info = self.progress_mgr.get_progress()
+        if new_current is None:
+            return
+        
+        # 防抖：只在需要时推送进度更新
+        now = time.time()
+        should_push = (
+            new_current >= self.total_images or  # 完成了
+            (now - self.last_update_time) > self.update_interval  # 超过间隔
+        )
+        
+        if should_push:
+            self.last_update_time = now
+            percent = int((new_current / self.total_images) * 100) if self.total_images > 0 else 0
+            
+            # 更新内存中的进度（用于 WebSocket 推送）
             with self.download_manager.progress_lock:
                 self.download_manager.progress_store[self.album_id] = {
-                    "current": progress_info["current"],
-                    "total": progress_info["total"],
+                    "current": new_current,
+                    "total": self.total_images,
                     "status": "downloading",
-                    "message": f"下载中 {progress_info['current']}/{progress_info['total']}",
-                    "percentage": progress_info["percentage"]
+                    "message": f"下载中 {new_current}/{self.total_images}",
+                    "percentage": percent
                 }
             
             # 异步推送进度更新
@@ -657,30 +760,141 @@ class DownloadManager:
 
     def download_sync(self, album_id: str):
         """
-        使用原子计数器和自定义下载器进行下载
-        废弃了基于日志解析的方式，改用 after_image 回调
+        使用 Redis HINCRBY 原子递增跟踪下载进度
+        在下载开始前就确定总页数并写入 Redis
         """
         try:
             # 初始化状态
             with self.progress_lock:
                 self.progress_store[album_id] = {"status": "starting", "message": "初始化..."}
             
-            # 获取 album 信息以确定总图片数
+            # ★★★ 关键：先获取 album 信息以确定总图片数 ★★★
             option = self.get_option()
+            
+            # ★★★ 确保基础目录存在 ★★★
+            # 从 option 中获取 base_dir，确保它存在
+            base_dir_path = None
+            if hasattr(option, 'dir_rule') and hasattr(option.dir_rule, 'base_dir'):
+                base_dir_str = option.dir_rule.base_dir
+                # 移除末尾的斜杠（如果有）
+                base_dir_str = base_dir_str.rstrip('/')
+                base_dir_path = Path(base_dir_str)
+                
+                try:
+                    # 确保基础目录存在（创建所有父目录）
+                    base_dir_path.mkdir(parents=True, exist_ok=True)
+                    print(f"✓ 确保基础目录存在: {base_dir_path}")
+                except (OSError, FileNotFoundError) as e:
+                    # 处理路径过长或其他文件系统错误
+                    error_msg = str(e)
+                    print(f"⚠ 创建基础目录失败: {base_dir_path}, 错误: {error_msg}")
+                    
+                    # 检查是否是父目录不存在的问题
+                    if "No such file or directory" in error_msg or e.errno == 2:
+                        # 尝试逐级创建父目录
+                        try:
+                            # 从根路径开始，逐级创建
+                            current_path = base_dir_path
+                            parents_to_create = []
+                            while not current_path.exists() and current_path != current_path.parent:
+                                parents_to_create.insert(0, current_path)
+                                current_path = current_path.parent
+                            
+                            # 创建所有缺失的父目录
+                            for parent in parents_to_create:
+                                try:
+                                    parent.mkdir(parents=False, exist_ok=True)
+                                    print(f"✓ 创建父目录: {parent}")
+                                except Exception as pe:
+                                    print(f"⚠ 创建父目录失败: {parent}, 错误: {pe}")
+                                    break
+                            
+                            # 再次尝试创建基础目录
+                            base_dir_path.mkdir(parents=True, exist_ok=True)
+                            print(f"✓ 基础目录创建成功: {base_dir_path}")
+                        except Exception as e2:
+                            print(f"⚠ 逐级创建目录也失败: {e2}")
+                            # 尝试使用 DEFAULT_IMAGE_DIR 作为备用
+                            if DEFAULT_IMAGE_DIR.exists():
+                                print(f"⚠ 使用备用目录: {DEFAULT_IMAGE_DIR}")
+                                base_dir_path = DEFAULT_IMAGE_DIR
+                            else:
+                                try:
+                                    DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                                    print(f"✓ 创建备用目录: {DEFAULT_IMAGE_DIR}")
+                                    base_dir_path = DEFAULT_IMAGE_DIR
+                                except Exception as e3:
+                                    print(f"⚠ 创建备用目录也失败: {e3}")
+                                    raise Exception(f"无法创建任何下载目录。原始错误: {error_msg}, 备用错误: {e3}")
+                    else:
+                        # 其他类型的错误，尝试使用备用目录
+                        if DEFAULT_IMAGE_DIR.exists():
+                            print(f"⚠ 使用备用目录: {DEFAULT_IMAGE_DIR}")
+                            base_dir_path = DEFAULT_IMAGE_DIR
+                        else:
+                            try:
+                                DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                                print(f"✓ 创建备用目录: {DEFAULT_IMAGE_DIR}")
+                                base_dir_path = DEFAULT_IMAGE_DIR
+                            except Exception as e2:
+                                print(f"⚠ 创建备用目录也失败: {e2}")
+                                raise Exception(f"无法创建任何下载目录: {error_msg}")
+                except Exception as e:
+                    print(f"⚠ 创建基础目录时发生未知错误: {base_dir_path}, 错误: {e}")
+                    # 最后尝试使用默认目录
+                    if DEFAULT_IMAGE_DIR.exists():
+                        base_dir_path = DEFAULT_IMAGE_DIR
+                    else:
+                        try:
+                            DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                            base_dir_path = DEFAULT_IMAGE_DIR
+                        except:
+                            raise Exception(f"无法创建下载目录: {e}")
+            
+            # 如果 base_dir 不存在，使用 DEFAULT_IMAGE_DIR
+            if base_dir_path is None or not base_dir_path.exists():
+                if DEFAULT_IMAGE_DIR.exists():
+                    base_dir_path = DEFAULT_IMAGE_DIR
+                else:
+                    try:
+                        DEFAULT_IMAGE_DIR.mkdir(parents=True, exist_ok=True)
+                        base_dir_path = DEFAULT_IMAGE_DIR
+                        print(f"✓ 使用默认目录: {base_dir_path}")
+                    except Exception as e:
+                        print(f"⚠ 无法创建默认目录: {e}")
+                        raise Exception(f"无法创建下载目录: {e}")
+            
             client = option.build_jm_client()
             album = client.get_album_detail(album_id)
             total_images = album.page_count  # 总图片数
             
-            # 创建进度管理器
-            progress_mgr = ProgressManager(total_images)
+            # ★★★ 在下载开始前，先初始化 Redis 状态（写入 total）★★★
+            # 注意：这里需要在线程中调用异步函数，使用 run_coroutine_threadsafe
+            if self._main_loop and self._main_loop.is_running():
+                future = asyncio.run_coroutine_threadsafe(
+                    init_download_status(album_id, total_images),
+                    self._main_loop
+                )
+                future.result(timeout=5)  # 等待初始化完成
             
-            # 创建自定义下载器（使用 after_image 回调）
-            downloader = ProgressTrackingDownloader(option, album_id, progress_mgr, self)
+            # 创建自定义下载器（使用 after_image 回调 + Redis HINCRBY）
+            downloader = ProgressTrackingDownloader(option, album_id, total_images, self)
             
             # 开始下载
             downloader.download_by_album_detail(album)
             
-            # 下载完成
+            # 下载完成，更新 Redis 状态
+            sync_redis = get_sync_redis_client()
+            if sync_redis:
+                try:
+                    key = get_download_status_key(album_id)
+                    sync_redis.hset(key, "status", "completed")
+                    sync_redis.hset(key, "current", str(total_images))
+                    sync_redis.hset(key, "updated_at", str(int(time.time())))
+                except Exception as e:
+                    print(f"⚠ 更新完成状态失败: {e}")
+            
+            # 更新内存中的进度
             with self.progress_lock:
                 self.progress_store[album_id] = {
                     "status": "completed", 
@@ -703,6 +917,15 @@ class DownloadManager:
             
             return {"success": True}
         except Exception as e:
+            # 更新错误状态到 Redis
+            sync_redis = get_sync_redis_client()
+            if sync_redis:
+                try:
+                    key = get_download_status_key(album_id)
+                    sync_redis.hset(key, "status", "error")
+                except Exception:
+                    pass
+            
             with self.progress_lock:
                 self.progress_store[album_id] = {"status": "error", "message": str(e)}
             
@@ -910,6 +1133,12 @@ def clean_album_id(album_id: str) -> str:
 class DownloadReq(BaseModel):
     album_id: str
     option_file: Optional[str] = None
+
+@app.get("/api/download/status")
+async def get_download_status_api(album_id: str = Query(..., description="相册ID")):
+    """获取下载状态（供前端轮询）"""
+    status = await get_download_status(album_id)
+    return status
 
 @app.post("/download")
 async def api_download(req: DownloadReq):

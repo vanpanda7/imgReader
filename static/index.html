@@ -669,15 +669,36 @@
 
         // 更新进度条
         function updateProgressBar(progress) {
-            const percentage = progress.percentage || 0;
-            progressBar.style.width = `${percentage}%`;
-            progressBarText.textContent = percentage > 0 ? `${percentage}%` : '';
-            progressPercentage.textContent = `${percentage}%`;
+            const total = progress.total || 0;
+            const current = progress.current || 0;
             
-            if (progress.total > 0) {
-                progressText.textContent = `${progress.message || '正在下载...'} (${progress.current}/${progress.total})`;
+            // 防御性编程：如果总数还没拿到
+            if (!total || total === 0) {
+                progressText.textContent = "正在获取信息...";
+                progressBar.style.width = "0%";
+                progressBarText.textContent = '';
+                progressPercentage.textContent = '0%';
+                return;
+            }
+            
+            // 计算百分比
+            const percentage = Math.floor((current / total) * 100);
+            
+            // 1. 设置进度条宽度 (CSS transition 会处理平滑过渡)
+            progressBar.style.width = `${percentage}%`;
+            
+            // 2. 设置具体的 分子/分母 文字
+            if (percentage >= 100 || progress.status === 'completed' || progress.status === 'finished') {
+                progressText.textContent = "下载完成";
+                progressBarText.textContent = '完成';
+                progressPercentage.textContent = '100%';
+                progressBar.style.background = "linear-gradient(90deg, #48bb78 0%, #38a169 100%)"; // 变绿
             } else {
-                progressText.textContent = progress.message || '准备开始...';
+                // 重点：在这里明确显示 "45 / 100 (45%)"
+                progressText.textContent = `${progress.message || '正在下载...'} (${current} / ${total})`;
+                progressBarText.textContent = percentage > 0 ? `${percentage}%` : '';
+                progressPercentage.textContent = `${percentage}%`;
+                progressBar.style.background = "linear-gradient(90deg, #667eea 0%, #764ba2 100%)"; // 恢复原色
             }
         }
 
