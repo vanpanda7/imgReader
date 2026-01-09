@@ -891,6 +891,39 @@
             cursor: zoom-in;
             transition: transform 0.3s ease;
         }
+        
+        /* --- 大图预览层 (Lightbox) --- */
+        .zoom-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: #000;
+            z-index: 9999;
+            display: none; /* 默认隐藏 */
+            align-items: center;
+            justify-content: center;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            overflow: hidden;
+            touch-action: none; /* 关键：禁止浏览器默认滚动 */
+        }
+        
+        .zoom-overlay.active {
+            display: flex;
+            opacity: 1;
+        }
+        
+        .zoom-overlay img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            transform-origin: center center;
+            /* 开启硬件加速，防止拖拽闪烁 */
+            will-change: transform; 
+            transition: transform 0.1s linear; /* 默认稍微平滑一点，拖拽时会动态改为0 */
+        }
 
         .nav-button {
             width: 50px;
@@ -1300,6 +1333,11 @@
             <span id="slider-total">100</span>
         </div>
     </div>
+    
+    <!-- 大图预览层 (Lightbox) -->
+    <div id="zoomOverlay" class="zoom-overlay">
+        <img id="zoomImage" src="" alt="Zoom View">
+    </div>
 
     <script>
         // ==================== 配置区域 ====================
@@ -1453,6 +1491,7 @@
             setupMenuToggle(); // 设置菜单切换
             setupDoubleTapZoom(); // 设置双击放大
             setupPagedMode(); // 设置分页模式
+            ZoomMgr.init(); // 初始化大图预览管理器
             updateNavButtons();
 
             // 1. 处理浏览器后退/前进按钮
@@ -2497,53 +2536,20 @@
             const imageWrapper = document.getElementById('imageWrapper');
             if (!imageWrapper) return;
             
-            imageWrapper.addEventListener('touchend', function(e) {
-                // 只处理图片的双击
-                if (e.target.tagName !== 'IMG') return;
-                
-                const currentTime = new Date().getTime();
-                const tapLength = currentTime - lastTap;
-                
-                // 判断双击（间隔小于300ms）
-                if (tapLength < 300 && tapLength > 0) {
-                    e.preventDefault();
-                    handleDoubleTap(e);
-                }
-                lastTap = currentTime;
-            });
-            
             // 桌面端双击
             imageWrapper.addEventListener('dblclick', function(e) {
                 if (e.target.tagName === 'IMG') {
                     e.preventDefault();
-                    handleDoubleTap(e);
+                    
+                    // 获取高清原图链接
+                    const imgSrc = e.target.getAttribute('data-src') || e.target.src;
+                    
+                    // 调用 ZoomMgr
+                    if (typeof ZoomMgr !== 'undefined' && ZoomMgr.handleDoubleTap) {
+                        ZoomMgr.handleDoubleTap(e, imgSrc);
+                    }
                 }
             });
-        }
-        
-        function handleDoubleTap(e) {
-            const target = e.target;
-            if (target.tagName !== 'IMG') return;
-            
-            // 简单的放大/复原逻辑
-            if (target.classList.contains('zoomed')) {
-                target.classList.remove('zoomed');
-                target.style.transform = 'scale(1)';
-                target.style.zIndex = 'auto';
-            } else {
-                // 计算点击位置作为放大中心
-                const rect = target.getBoundingClientRect();
-                const x = (e.clientX || (e.touches && e.touches[0].clientX) || 0) - rect.left;
-                const y = (e.clientY || (e.touches && e.touches[0].clientY) || 0) - rect.top;
-                
-                const percentX = (x / rect.width) * 100;
-                const percentY = (y / rect.height) * 100;
-                
-                target.style.transformOrigin = `${percentX}% ${percentY}%`;
-                target.style.transform = 'scale(2)';
-                target.style.zIndex = '100';
-                target.classList.add('zoomed');
-            }
         }
         
         // ==================== 分页模式 ====================
@@ -2780,7 +2786,32 @@
                     return;
                 }
                 
-                // B. 触发上拉跳转
+                // B. 处理双击（在长按和上拉之后检查）
+                if (e.target.tagName === 'IMG' && !isPullingUp) {
+                    const currentTime = new Date().getTime();
+                    const tapLength = currentTime - lastTap;
+                    
+                    // 如果是双击 (间隔 < 300ms)
+                    if (tapLength < 300 && tapLength > 0) {
+                        e.preventDefault(); // 阻止浏览器默认行为
+                        
+                        // 获取高清原图链接 (优先用 data-src, 其次 src)
+                        const imgSrc = e.target.getAttribute('data-src') || e.target.src;
+                        
+                        // 调用 ZoomMgr
+                        if (typeof ZoomMgr !== 'undefined' && ZoomMgr.handleDoubleTap) {
+                            const touch = e.changedTouches[0];
+                            const fakeEvent = {
+                                clientX: touch.clientX,
+                                clientY: touch.clientY
+                            };
+                            ZoomMgr.handleDoubleTap(fakeEvent, imgSrc);
+                        }
+                    }
+                    lastTap = currentTime;
+                }
+                
+                // C. 触发上拉跳转
                 if (isPullingUp) {
                     isPullingUp = false;
                     const hintContainer = document.querySelector('.next-chapter-hint');
@@ -3680,6 +3711,197 @@
             const scrollAmount = window.innerHeight * 0.5 * direction;
             viewer.scrollBy({ top: scrollAmount, behavior: 'smooth' });
         }
+
+        // ==================== 高级大图预览管理器 ====================
+        const ZoomMgr = {
+            overlay: null,
+            img: null,
+            state: {
+                scale: 1,
+                pX: 0, pY: 0, // 当前位移
+                startX: 0, startY: 0, // 拖拽起始点
+                initialDistance: 0, // 双指初始距离
+                isDragging: false,
+                isPinching: false
+            },
+            
+            init: function() {
+                this.overlay = document.getElementById('zoomOverlay');
+                this.img = document.getElementById('zoomImage');
+                if (!this.overlay || !this.img) return;
+
+                // 绑定手势事件
+                this.overlay.addEventListener('touchstart', this.handleStart.bind(this), { passive: false });
+                this.overlay.addEventListener('touchmove', this.handleMove.bind(this), { passive: false });
+                this.overlay.addEventListener('touchend', this.handleEnd.bind(this));
+                
+                // 鼠标事件（桌面端）
+                this.overlay.addEventListener('mousedown', (e) => {
+                    this.handleStart(e);
+                    const handleMouseMove = (e) => this.handleMove(e);
+                    const handleMouseUp = () => {
+                        this.handleEnd();
+                        document.removeEventListener('mousemove', handleMouseMove);
+                        document.removeEventListener('mouseup', handleMouseUp);
+                    };
+                    document.addEventListener('mousemove', handleMouseMove);
+                    document.addEventListener('mouseup', handleMouseUp);
+                });
+                
+                // 双击放大（在预览层内）
+                let lastTapTime = 0;
+                this.overlay.addEventListener('click', (e) => {
+                    if (this.state.isDragging || this.state.isPinching) return;
+                    
+                    const currentTime = new Date().getTime();
+                    const tapLength = currentTime - lastTapTime;
+                    
+                    if (tapLength < 300 && tapLength > 0) {
+                        // 双击
+                        this.handleDoubleTap(e, null);
+                    } else if (this.state.scale <= 1.1) {
+                        // 单击且未放大，关闭预览
+                        this.close();
+                    }
+                    lastTapTime = currentTime;
+                });
+            },
+
+            open: function(src) {
+                this.img.src = src;
+                this.resetState();
+                this.overlay.classList.add('active');
+                // 进入预览时，强制隐藏之前的工具栏
+                document.body.classList.remove('show-menu');
+            },
+
+            close: function() {
+                this.overlay.classList.remove('active');
+                this.img.src = ""; // 清理内存
+                this.resetState();
+            },
+
+            resetState: function() {
+                this.state = { scale: 1, pX: 0, pY: 0, startX: 0, startY: 0, isDragging: false, isPinching: false, initialDistance: 0 };
+                this.updateTransform(true);
+            },
+
+            handleStart: function(e) {
+                const touches = e.touches || (e.type === 'mousedown' ? [{ clientX: e.clientX, clientY: e.clientY }] : []);
+                
+                if (touches.length === 2) {
+                    // 双指捏合开始
+                    this.state.isPinching = true;
+                    this.state.initialDistance = this.getDistance(touches);
+                } else if (touches.length === 1 || e.type === 'mousedown') {
+                    // 单指拖拽开始
+                    this.state.isDragging = true;
+                    const clientX = touches[0] ? touches[0].clientX : e.clientX;
+                    const clientY = touches[0] ? touches[0].clientY : e.clientY;
+                    this.state.startX = clientX - this.state.pX;
+                    this.state.startY = clientY - this.state.pY;
+                    // 拖拽时取消过渡动画，保证跟手
+                    this.img.style.transition = 'none';
+                }
+            },
+
+            handleMove: function(e) {
+                if (!this.overlay.classList.contains('active')) return;
+                
+                e.preventDefault(); // 阻止浏览器缩放/滚动
+                
+                const touches = e.touches || (e.type === 'mousemove' && this.state.isDragging ? [{ clientX: e.clientX, clientY: e.clientY }] : []);
+                
+                if (this.state.isPinching && touches.length === 2) {
+                    // 处理捏合
+                    const currentDistance = this.getDistance(touches);
+                    const ratio = currentDistance / this.state.initialDistance;
+                    // 限制缩放范围 0.5x ~ 5x
+                    const newScale = Math.min(Math.max(this.state.scale * ratio, 0.5), 5);
+                    this.state.scale = newScale;
+                    this.updateTransform(false);
+                    
+                } else if (this.state.isDragging && (touches.length === 1 || e.type === 'mousemove') && this.state.scale > 1) {
+                    // 处理拖拽 (只有放大后才能拖拽)
+                    const clientX = touches[0] ? touches[0].clientX : e.clientX;
+                    const clientY = touches[0] ? touches[0].clientY : e.clientY;
+                    const x = clientX - this.state.startX;
+                    const y = clientY - this.state.startY;
+                    
+                    this.state.pX = x;
+                    this.state.pY = y;
+                    this.updateTransform(false);
+                }
+            },
+
+            handleEnd: function(e) {
+                this.state.isDragging = false;
+                this.state.isPinching = false;
+                // 恢复过渡动画
+                this.img.style.transition = 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                
+                // 拖拽结束后的边界回弹逻辑（简化版：如果缩小了，归位）
+                if (this.state.scale < 1) {
+                    this.state.scale = 1;
+                    this.state.pX = 0;
+                    this.state.pY = 0;
+                    this.updateTransform(true);
+                }
+            },
+
+            // 核心：处理双击 (Smart Zoom)
+            handleDoubleTap: function(e, imageSrc) {
+                // 如果预览层没开，这就意味着用户在外面双击了 -> 打开预览层
+                if (!this.overlay.classList.contains('active')) {
+                    if (!imageSrc) return;
+                    this.open(imageSrc);
+                    
+                    // 第一次打开默认放大到2.5倍
+                    setTimeout(() => {
+                        this.zoomTo(2.5, e.clientX, e.clientY);
+                    }, 50);
+                    return;
+                }
+
+                // 如果已经在预览层里双击 -> 切换放大/缩小
+                if (this.state.scale > 1.5) {
+                    // 缩小后直接关闭预览层
+                    this.close();
+                } else {
+                    // 放大
+                    this.zoomTo(2.5, e.clientX, e.clientY);
+                }
+            },
+
+            zoomTo: function(targetScale, tapX, tapY) {
+                // 计算点击点相对于图片中心的偏移，以便放大时向点击点聚焦
+                if (tapX && tapY) {
+                    // 简化处理：直接归零偏移，居中放大
+                    this.state.pX = 0;
+                    this.state.pY = 0;
+                }
+
+                this.state.scale = targetScale;
+                this.updateTransform(true);
+            },
+
+            updateTransform: function(withTransition) {
+                if (withTransition) {
+                    this.img.style.transition = 'transform 0.2s cubic-bezier(0.25, 0.46, 0.45, 0.94)';
+                } else {
+                    this.img.style.transition = 'none';
+                }
+                this.img.style.transform = `translate(${this.state.pX}px, ${this.state.pY}px) scale(${this.state.scale})`;
+            },
+
+            getDistance: function(touches) {
+                if (touches.length < 2) return 0;
+                return Math.hypot(
+                    touches[0].clientX - touches[1].clientX,
+                    touches[0].clientY - touches[1].clientY
+                );
+            }
+        };
 
         // 页面加载时初始化
         window.addEventListener('load', init);

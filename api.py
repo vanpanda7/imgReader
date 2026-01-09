@@ -23,6 +23,14 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, Field
 from PIL import Image
 
+# 引入异步 Redis (替代同步 redis)
+try:
+    from redis import asyncio as aioredis
+    AIOREDIS_AVAILABLE = True
+except ImportError:
+    AIOREDIS_AVAILABLE = False
+    print("⚠ aioredis 未安装，将使用内存缓存。请运行: pip install redis>=4.2.0")
+
 # 引入项目依赖
 # 将 src 目录添加到 Python 路径，以便导入 jmcomic 模块
 # 这样即使不设置 PYTHONPATH 也能正常工作
@@ -44,16 +52,12 @@ SERVER_CONFIG = config.SERVER_CONFIG
 REDIS_CONFIG = config.REDIS_CONFIG
 API_CONFIG = config.API_CONFIG
 
-# 初始化 Redis
-redis_client = None
-try:
-    import redis
-    redis_client = redis.Redis(**REDIS_CONFIG)
-    redis_client.ping()
-    print("✓ Redis 连接成功")
-except Exception as e:
-    print(f"⚠ Redis 连接失败或未安装: {e}，将使用内存缓存")
-    redis_client = None
+# 定义独立的图片处理线程池 (建议设置为 CPU 核心数，例如 4)
+# 这样可以保证看图时不影响目录加载
+import os
+cpu_count = os.cpu_count() or 4
+image_executor = ThreadPoolExecutor(max_workers=min(cpu_count, 4), thread_name_prefix="img_worker")
+print(f"✓ 图片处理线程池已创建 (工作线程数: {min(cpu_count, 4)})")
 
 # ==================== 核心修改区域 Start ====================
 
@@ -100,7 +104,7 @@ DEFAULT_IMAGE_DIR = get_default_image_dir()
 # ==================== 核心服务类 ====================
 
 class CacheService:
-    """统一管理 Redis 和内存缓存"""
+    """统一管理 Redis (异步) 和内存缓存"""
     _instance = None
     _lock = threading.Lock()
     
@@ -112,10 +116,78 @@ class CacheService:
                     cls._instance._init_cache()
         return cls._instance
     
+    async def _init_cache_async(self):
+        """异步初始化 Redis 连接（需要在事件循环中调用）"""
+        self.redis = None
+        try:
+            # 使用 aioredis 创建异步连接池
+            if AIOREDIS_AVAILABLE and REDIS_CONFIG:
+                # 构建 Redis URL
+                host = REDIS_CONFIG.get('host', 'localhost')
+                port = REDIS_CONFIG.get('port', 6379)
+                password = REDIS_CONFIG.get('password')
+                db = REDIS_CONFIG.get('db', 0)
+                
+                # 构建连接参数
+                if password:
+                    redis_url = f"redis://:{password}@{host}:{port}/{db}"
+                else:
+                    redis_url = f"redis://{host}:{port}/{db}"
+                
+                # 使用 aioredis.from_url 创建异步连接
+                self.redis = await aioredis.from_url(
+                    redis_url,
+                    decode_responses=False  # 保持为 bytes，方便处理图片
+                )
+                # 测试连接
+                await self.redis.ping()
+                print("✓ Redis (Async) 连接成功")
+        except Exception as e:
+            print(f"⚠ Redis 连接失败: {e}，将使用内存缓存")
+            self.redis = None
+
     def _init_cache(self):
-        self.redis = redis_client
+        """同步初始化（仅初始化内存缓存，Redis 异步初始化在启动时完成）"""
+        self.redis = None  # 将在启动时异步初始化
         self.memory_cache = {}
-        self.mem_lock = threading.Lock()
+        self.mem_lock = threading.Lock()  # 内存缓存依然用锁
+        self._redis_initialized = False  # 标记 Redis 是否已初始化
+    
+    async def _ensure_redis(self):
+        """确保 Redis 连接已初始化（延迟初始化）"""
+        if self._redis_initialized:
+            return
+        
+        if self.redis is not None:
+            self._redis_initialized = True
+            return
+            
+        try:
+            if AIOREDIS_AVAILABLE and REDIS_CONFIG:
+                host = REDIS_CONFIG.get('host', 'localhost')
+                port = REDIS_CONFIG.get('port', 6379)
+                password = REDIS_CONFIG.get('password')
+                db = REDIS_CONFIG.get('db', 0)
+                
+                # 构建连接参数
+                if password:
+                    redis_url = f"redis://:{password}@{host}:{port}/{db}"
+                else:
+                    redis_url = f"redis://{host}:{port}/{db}"
+                
+                # 使用 aioredis.from_url 创建异步连接
+                self.redis = await aioredis.from_url(
+                    redis_url,
+                    decode_responses=False  # 保持为 bytes，方便处理图片
+                )
+                # 测试连接
+                await self.redis.ping()
+                self._redis_initialized = True
+                print("✓ Redis (Async) 连接成功")
+        except Exception as e:
+            print(f"⚠ Redis 连接失败: {e}，将使用内存缓存")
+            self.redis = None
+            self._redis_initialized = True  # 标记为已尝试，避免重复尝试
     
     def get_key(self, prefix: str, *args) -> str:
         key_str = ":".join(str(arg) for arg in args)
@@ -123,70 +195,92 @@ class CacheService:
         return f"jmcomic:{prefix}:{key_hash}"
     
     async def get(self, key: str):
+        # 确保 Redis 已初始化
+        await self._ensure_redis()
+        
+        # 1. 尝试 Redis (异步)
         if self.redis:
             try:
-                cached = self.redis.get(key)
-                if cached: return json.loads(cached)
+                # 重点：加了 await
+                cached = await self.redis.get(key)
+                if cached: 
+                    # 只有 JSON 字符串才 decode，否则如果是 bytes 直接处理会报错
+                    # 这里假设普通 get 存的是 JSON 字符串
+                    return json.loads(cached.decode('utf-8'))
             except Exception: pass
+            
+        # 2. 降级到内存缓存
         with self.mem_lock:
             return self.memory_cache.get(key)
     
     async def set(self, key: str, value: Any, ttl: int = None):
-        # 从配置文件读取默认TTL
+        # 确保 Redis 已初始化
+        await self._ensure_redis()
+        
         if ttl is None:
             ttl = API_CONFIG["cache"]["default_ttl"]
+            
+        # 序列化
         val_str = json.dumps(value, ensure_ascii=False, default=str)
+        
+        # 1. 尝试 Redis (异步)
         if self.redis:
             try:
-                self.redis.setex(key, ttl, val_str)
+                # 重点：加了 await
+                await self.redis.setex(key, ttl, val_str)
                 return
             except Exception: pass
+            
+        # 2. 内存缓存
         with self.mem_lock:
             self.memory_cache[key] = value
-            # 从配置文件读取内存缓存最大大小
             max_size = API_CONFIG["cache"]["memory_cache_max_size"]
             if len(self.memory_cache) > max_size:
                 self.memory_cache.pop(next(iter(self.memory_cache)))
 
-    def get_thumbnail(self, key: str) -> Optional[Tuple[bytes, str]]:
-        """
-        获取二进制缓存
-        返回: (图片数据, MIME类型) 或 None
-        """
+    async def get_thumbnail(self, key: str) -> Optional[Tuple[bytes, str]]:
+        """获取二进制缓存 (异步)"""
+        # 确保 Redis 已初始化
+        await self._ensure_redis()
+        
         if self.redis:
             try:
-                # 尝试获取数据和MIME类型
-                data = self.redis.get(f"{key}:data")
-                mime = self.redis.get(f"{key}:mime")
+                # 重点：并发获取 data 和 mime，提高速度
+                data, mime = await asyncio.gather(
+                    self.redis.get(f"{key}:data"),
+                    self.redis.get(f"{key}:mime")
+                )
                 if data and mime:
-                    return (data, mime.decode('utf-8') if isinstance(mime, bytes) else mime)
+                    return (data, mime.decode('utf-8'))
             except Exception: pass
         return None
 
-    def set_thumbnail(self, key: str, data: bytes, mime_type: str, ttl: int = None):
-        """
-        设置二进制缓存
-        """
-        # 从配置文件读取默认缩略图缓存TTL
+    async def set_thumbnail(self, key: str, data: bytes, mime_type: str, ttl: int = None):
+        """设置二进制缓存 (异步)"""
+        # 确保 Redis 已初始化
+        await self._ensure_redis()
+        
         if ttl is None:
             ttl = API_CONFIG["cache"]["thumbnail_ttl"]
         if self.redis:
             try:
-                # 分别存储数据和MIME类型
-                self.redis.setex(f"{key}:data", ttl, data)
-                self.redis.setex(f"{key}:mime", ttl, mime_type)
+                # 重点：使用 pipeline 批量写入，减少网络 RTT
+                async with self.redis.pipeline() as pipe:
+                    pipe.setex(f"{key}:data", ttl, data)
+                    pipe.setex(f"{key}:mime", ttl, mime_type)
+                    await pipe.execute()
             except Exception: pass
 
     async def clear(self, pattern: str = "jmcomic:*"):
+        # 确保 Redis 已初始化
+        await self._ensure_redis()
+        
         if self.redis:
             try:
-                cursor = 0
-                # 从配置文件读取Redis扫描批量大小
-                scan_count = API_CONFIG["cache"]["redis_scan_count"]
-                while True:
-                    cursor, keys = self.redis.scan(cursor, match=pattern, count=scan_count)
-                    if keys: self.redis.delete(*keys)
-                    if cursor == 0: break
+                # 异步扫描和删除
+                keys = await self.redis.keys(pattern)
+                if keys:
+                    await self.redis.delete(*keys)
             except Exception: pass
         with self.mem_lock:
             self.memory_cache.clear()
@@ -368,9 +462,25 @@ class FileService:
                 img = img.crop((left, top, left + width, top + height))
                 
                 output = BytesIO()
-                # 从配置文件读取图片压缩质量（适用于JPEG和WebP）
+                # 从配置文件读取缩略图专用压缩质量（比普通图片质量低，提升性能）
+                thumbnail_quality = API_CONFIG["image"].get("thumbnail_quality", 75)
                 image_quality = API_CONFIG["image"]["image_quality"]
-                img.save(output, format=output_format, quality=image_quality)
+                # 使用缩略图专用质量（如果配置了），否则使用普通质量
+                quality = thumbnail_quality if "thumbnail_quality" in API_CONFIG["image"] else image_quality
+                
+                # 优化：根据格式使用不同的保存参数
+                save_kwargs = {"format": output_format, "quality": quality}
+                
+                # WebP 格式优化：添加 method 参数（0-6，值越大压缩越好但越慢）
+                # 对于缩略图，使用 method=4 在速度和压缩率之间取得平衡
+                if output_format == 'WEBP':
+                    save_kwargs["method"] = 4  # 平衡压缩速度和文件大小
+                
+                # JPEG 格式优化：使用 optimize=True 可以进一步减小文件大小
+                if output_format == 'JPEG':
+                    save_kwargs["optimize"] = True
+                
+                img.save(output, **save_kwargs)
                 return output.getvalue(), mime_type
         except Exception as e:
             raise HTTPException(500, f"缩略图错误: {e}")
@@ -607,21 +717,26 @@ async def api_thumbnail(
     if height is None:
         height = API_CONFIG["image"]["thumbnail_default_height"]
     
-    # 缓存键需要包含格式信息（如果格式是auto，会在生成时确定）
-    # 为了简化，我们先尝试从缓存获取，如果格式不匹配会重新生成
     key = cache_service.get_key("thumb", comic_dir, path, width, height)
     
-    cached = cache_service.get_thumbnail(key)
+    # 1. 异步获取缓存
+    cached = await cache_service.get_thumbnail(key)
     if cached:
         cached_data, cached_mime = cached
-        # 从配置文件读取缩略图缓存时间
         thumbnail_cache_age = API_CONFIG["image"]["thumbnail_cache_max_age"]
         return Response(cached_data, media_type=cached_mime, headers={"X-Cache": "HIT", "Cache-Control": f"public, max-age={thumbnail_cache_age}"})
 
     try:
         loop = asyncio.get_event_loop()
-        data, mime_type = await loop.run_in_executor(None, file_service.generate_thumbnail, root_dir, path, width, height)
-        cache_service.set_thumbnail(key, data, mime_type)
+        # 2. 重点：使用 image_executor 独立线程池
+        data, mime_type = await loop.run_in_executor(
+            image_executor, 
+            file_service.generate_thumbnail, 
+            root_dir, path, width, height
+        )
+        
+        # 3. 异步写入缓存
+        await cache_service.set_thumbnail(key, data, mime_type)
         return Response(data, media_type=mime_type, headers={"X-Cache": "MISS"})
     except HTTPException: raise
     except Exception as e: raise HTTPException(500, str(e))
@@ -673,19 +788,25 @@ class CategoryReq(BaseModel):
 @app.post("/api/category")
 async def api_category(req: CategoryReq):
     try:
+        # 获取客户端 (这里通常是轻量的，不需要 await)
         client = jm_client_manager.get_client()
-        # 这里需要适配 jmcomic 的具体返回结构，简化处理
-        # 实际代码中建议把之前的解析逻辑封装成函数
-        page = client.categories_filter(req.page, req.time, req.category, req.order_by)
+        
+        # 重点：将同步的 categories_filter 放入线程池执行
+        loop = asyncio.get_event_loop()
+        page = await loop.run_in_executor(
+            None,  # 这里可以用默认线程池，因为它属于 IO 操作
+            lambda: client.categories_filter(req.page, req.time, req.category, req.order_by)
+        )
         
         albums = []
+        # iter_id_title_tag 是内存操作，速度很快，可以直接跑
         for aid, info in page.iter_id_title_tag():
             albums.append({
                 "album_id": aid,
                 "title": info.get('name'),
                 "tags": info.get('tags', []),
                 "author": info.get('author'),
-                "cover_url": f"https://{client.get_html_domain()}/media/albums/{aid}.jpg" # 简易拼接
+                "cover_url": f"https://{client.get_html_domain()}/media/albums/{aid}.jpg"  # 简易拼接
             })
             
         return {"success": True, "albums": albums, "total": len(albums)}
