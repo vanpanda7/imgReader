@@ -200,14 +200,29 @@
         }
 
         .toolbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
             padding: 10px 20px;
-            background: rgba(0, 0, 0, 0.7);
+            background: rgba(0, 0, 0, 0.9);
             display: flex;
             justify-content: space-between;
             align-items: center;
-            z-index: 10;
+            z-index: 1001; /* 确保在最上层 */
             flex-wrap: wrap;
             gap: 10px;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            transform: translateY(0);
+            opacity: 1;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* 菜单隐藏状态 - 使用滑出动画 */
+        .toolbar.hidden-menu {
+            transform: translateY(-100%); /* 向上滑出 */
+            opacity: 0;
+            pointer-events: none; /* 禁用交互 */
         }
 
         .toolbar-left, .toolbar-right {
@@ -255,6 +270,44 @@
             touch-action: pan-y; /* 允许垂直滚动 */
         }
         
+        /* 卷轴模式（默认） */
+        .image-viewer.scroll-mode .image-wrapper {
+            width: 100%;
+            max-width: 1200px;
+            display: flex;
+            flex-direction: column;
+            gap: 0px;
+        }
+        
+        /* 分页模式 */
+        .image-viewer.paged-mode {
+            overflow-x: auto;
+            overflow-y: hidden;
+            padding: 0;
+            scroll-snap-type: x mandatory;
+            display: flex;
+            flex-direction: row;
+            touch-action: pan-x;
+        }
+        
+        .image-viewer.paged-mode .image-wrapper {
+            display: flex;
+            flex-direction: row;
+            width: auto;
+            max-width: none;
+            min-width: 100%;
+        }
+        
+        .image-viewer.paged-mode .image-wrapper img {
+            width: 100vw;
+            height: 100vh;
+            min-height: 100vh;
+            object-fit: contain;
+            scroll-snap-align: start;
+            flex-shrink: 0;
+            margin-bottom: 0;
+        }
+        
         .image-wrapper {
             width: 100%;
             max-width: 1200px;
@@ -275,13 +328,13 @@
             height: auto;
             /* 关键：给未加载的图片一个最小高度，防止所有图片挤在视口内导致瞬间全加载 */
             min-height: 300px; 
-            display: block;
+            display: block; /* 关键：防止行内元素基线导致的4px间隙 */
             object-fit: contain;
             /* 默认透明，加载完成后通过 .loaded 类显示，制造淡入效果 */
             opacity: 0;
             transition: opacity 0.3s ease-in;
             background: #111; /* 占位背景色 */
-            margin-bottom: 10px;
+            margin-bottom: 0; /* 移除间距，实现无缝连接 */
         }
         
         .image-wrapper img:not(.loaded) {
@@ -321,6 +374,52 @@
             width: 100vw;
             height: 100vh;
             z-index: 1000;
+        }
+        
+        /* 全屏时的样式优化 */
+        :fullscreen {
+            background-color: #000; /* 确保背景全黑 */
+            overflow-y: auto;       /* 保持竖向滚动 */
+        }
+        
+        /* 全屏时隐藏侧边栏，强制专注阅读 */
+        :fullscreen .sidebar {
+            display: none !important;
+        }
+        
+        /* 全屏时调整图片容器，使其在竖屏下更自然 */
+        :fullscreen .image-wrapper {
+            max-width: 100%;       /* 允许占满屏幕宽度 */
+            width: 100%;
+            margin: 0 auto;
+        }
+        
+        /* 全屏时隐藏顶部工具栏和底部按钮（可选，如需退出全屏请使用 ESC 键或手机原生手势） */
+        :fullscreen .toolbar,
+        :fullscreen .nav-buttons {
+            display: none;
+        }
+        
+        /* 针对 Webkit 内核浏览器的全屏伪类兼容 */
+        :-webkit-full-screen {
+            background-color: #000;
+            width: 100%;
+            height: 100%;
+        }
+        
+        :-webkit-full-screen .sidebar {
+            display: none !important;
+        }
+        
+        :-webkit-full-screen .image-wrapper {
+            max-width: 100%;
+            width: 100%;
+            margin: 0 auto;
+        }
+        
+        :-webkit-full-screen .toolbar,
+        :-webkit-full-screen .nav-buttons {
+            display: none;
         }
 
         /* 文件夹浏览器 */
@@ -685,12 +784,112 @@
             display: flex;
             flex-direction: column;
             gap: 10px;
-            z-index: 1000;
-            transition: right 0.3s ease;
+            z-index: 1001; /* 确保在最上层 */
+            transition: transform 0.3s ease, opacity 0.3s ease, right 0.3s ease;
+            transform: translateX(0);
+            opacity: 1;
         }
 
         .nav-buttons.hidden {
             right: -80px;
+        }
+        
+        .nav-buttons.hidden-menu {
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(100%); /* 向右滑出 */
+        }
+        
+        /* 底部菜单（进度条） */
+        .bottom-menu {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 15px 20px;
+            z-index: 1001; /* 确保在最上层 */
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            transform: translateY(0);
+            opacity: 1;
+            backdrop-filter: blur(10px);
+        }
+        
+        /* 底部菜单隐藏状态 - 使用滑出动画 */
+        .bottom-menu.hidden-menu {
+            transform: translateY(100%); /* 向下滑出 */
+            opacity: 0;
+            pointer-events: none; /* 禁用交互 */
+        }
+        
+        .slider-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .slider-container span {
+            color: #fff;
+            font-size: 14px;
+            font-weight: 500;
+            min-width: 40px;
+            text-align: center;
+        }
+        
+        #page-slider {
+            flex: 1;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+        }
+        
+        #page-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        #page-slider::-webkit-slider-thumb:hover {
+            background: #5568d3;
+            transform: scale(1.2);
+        }
+        
+        #page-slider::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s;
+        }
+        
+        #page-slider::-moz-range-thumb:hover {
+            background: #5568d3;
+            transform: scale(1.2);
+        }
+        
+        /* 双击放大样式 */
+        .image-wrapper img.zoomed {
+            transform: scale(2);
+            z-index: 100;
+            transition: transform 0.3s ease;
+            cursor: zoom-out;
+        }
+        
+        .image-wrapper img {
+            cursor: zoom-in;
+            transition: transform 0.3s ease;
         }
 
         .nav-button {
@@ -967,11 +1166,15 @@
             
             /* 移动端阅读器：减小边距和间距 */
             body.mobile-reader-active .image-viewer {
-                padding: 5px; /* 从 20px 减小到 5px */
+                padding: 0; /* 完全移除边距，实现无缝体验 */
+            }
+            
+            body.mobile-reader-active .image-viewer.paged-mode {
+                padding: 0;
             }
             
             body.mobile-reader-active .image-wrapper img {
-                margin-bottom: 3px; /* 从 10px 减小到 3px */
+                margin-bottom: 0; /* 无缝连接 */
             }
             
             body.mobile-reader-active .toolbar {
@@ -1052,6 +1255,7 @@
                     <button class="toolbar-btn mobile-back-btn" onclick="goToParent()" title="返回上一级">⬅ 返回选集</button>
                     <button class="toolbar-btn" onclick="toggleSidebar()" title="显示/隐藏列表">📋 列表</button>
                     <button class="toolbar-btn" onclick="toggleFullscreen()" title="全屏/退出全屏">⛶ 全屏</button>
+                    <button class="toolbar-btn" onclick="togglePagedMode()" title="切换分页/卷轴模式" id="pagedModeBtn">📄 分页</button>
                     <button class="toolbar-btn" onclick="goToIndex()" title="返回主界面">🏠 主页</button>
                 </div>
                 <div class="toolbar-right">
@@ -1086,6 +1290,15 @@
     <div id="longPressOverlay" class="long-press-overlay">
         <div class="icon"></div>
         <div class="text"></div>
+    </div>
+    
+    <!-- 底部菜单（进度条） -->
+    <div class="bottom-menu hidden-menu" id="bottomMenu">
+        <div class="slider-container">
+            <span id="slider-current">1</span>
+            <input type="range" id="page-slider" min="1" max="100" value="1" oninput="handleSliderChange(this.value)">
+            <span id="slider-total">100</span>
+        </div>
     </div>
 
     <script>
@@ -1160,6 +1373,8 @@
         function exitMobileReader() {
             if (window.innerWidth <= 768) {
                 document.body.classList.remove('mobile-reader-active');
+                // 退出阅读器时，隐藏所有菜单（工具栏、底部菜单、导航按钮）
+                toggleMenus(false);
             }
         }
         
@@ -1217,6 +1432,9 @@
         let mainImageObserver = null; // 主图观察器（全局变量，方便销毁）
         let pageCounterObserver = null; // 页码计数器观察器（全局变量，方便销毁）
         let thumbnailObserver; // 缩略图观察器
+        let isMenuVisible = false; // 菜单显示状态
+        let isPagedMode = false; // 是否为分页模式
+        let lastTap = 0; // 双击检测
 
         // ==================== 初始化函数 ====================
         /**
@@ -1232,6 +1450,9 @@
             setupObservers(); // 注册观察器
             setupPullUpToLoad(); // 注册上拉手势（替换原来的 setupScrollToLoad）
             setupImageViewerInteractions(); // 注册图片查看器的长按和上拉跳转交互
+            setupMenuToggle(); // 设置菜单切换
+            setupDoubleTapZoom(); // 设置双击放大
+            setupPagedMode(); // 设置分页模式
             updateNavButtons();
 
             // 1. 处理浏览器后退/前进按钮
@@ -2206,6 +2427,247 @@
             }, 1500);
         }
 
+        // ==================== 菜单切换 ====================
+        function setupMenuToggle() {
+            const viewer = document.getElementById('imageViewer');
+            if (!viewer) return;
+            
+            // 默认隐藏菜单
+            toggleMenus(false);
+            
+            // 点击中央区域切换菜单
+            viewer.addEventListener('click', (e) => {
+                // 如果点击的是按钮或链接，不处理
+                if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+                    return;
+                }
+                
+                // 如果是长按或拖拽结束，不触发点击
+                if (e.target.closest('.long-press-overlay')) {
+                    return;
+                }
+                
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                const x = e.clientX;
+                const y = e.clientY;
+                
+                // 定义中央区域（中间30%宽度和高度）
+                const centerZoneX = width * 0.35;
+                const centerZoneWidth = width * 0.3;
+                const centerZoneY = height * 0.35;
+                const centerZoneHeight = height * 0.3;
+                
+                // 判断是否点击在中央区域
+                if (x > centerZoneX && x < (centerZoneX + centerZoneWidth) &&
+                    y > centerZoneY && y < (centerZoneY + centerZoneHeight)) {
+                    toggleMenus();
+                } else if (!isPagedMode) {
+                    // 卷轴模式下，点击两侧不做处理（保持滚动）
+                    // 分页模式下，点击两侧翻页（在 setupPagedMode 中处理）
+                }
+            });
+        }
+        
+        // 切换菜单显示/隐藏
+        function toggleMenus(forceState = null) {
+            const toolbar = document.querySelector('.toolbar');
+            const navButtons = document.getElementById('navButtons');
+            const bottomMenu = document.getElementById('bottomMenu');
+            
+            if (forceState !== null) {
+                isMenuVisible = forceState;
+            } else {
+                isMenuVisible = !isMenuVisible;
+            }
+            
+            if (isMenuVisible) {
+                toolbar?.classList.remove('hidden-menu');
+                navButtons?.classList.remove('hidden-menu');
+                bottomMenu?.classList.remove('hidden-menu');
+            } else {
+                toolbar?.classList.add('hidden-menu');
+                navButtons?.classList.add('hidden-menu');
+                bottomMenu?.classList.add('hidden-menu');
+            }
+        }
+        
+        // ==================== 双击放大 ====================
+        function setupDoubleTapZoom() {
+            const imageWrapper = document.getElementById('imageWrapper');
+            if (!imageWrapper) return;
+            
+            imageWrapper.addEventListener('touchend', function(e) {
+                // 只处理图片的双击
+                if (e.target.tagName !== 'IMG') return;
+                
+                const currentTime = new Date().getTime();
+                const tapLength = currentTime - lastTap;
+                
+                // 判断双击（间隔小于300ms）
+                if (tapLength < 300 && tapLength > 0) {
+                    e.preventDefault();
+                    handleDoubleTap(e);
+                }
+                lastTap = currentTime;
+            });
+            
+            // 桌面端双击
+            imageWrapper.addEventListener('dblclick', function(e) {
+                if (e.target.tagName === 'IMG') {
+                    e.preventDefault();
+                    handleDoubleTap(e);
+                }
+            });
+        }
+        
+        function handleDoubleTap(e) {
+            const target = e.target;
+            if (target.tagName !== 'IMG') return;
+            
+            // 简单的放大/复原逻辑
+            if (target.classList.contains('zoomed')) {
+                target.classList.remove('zoomed');
+                target.style.transform = 'scale(1)';
+                target.style.zIndex = 'auto';
+            } else {
+                // 计算点击位置作为放大中心
+                const rect = target.getBoundingClientRect();
+                const x = (e.clientX || (e.touches && e.touches[0].clientX) || 0) - rect.left;
+                const y = (e.clientY || (e.touches && e.touches[0].clientY) || 0) - rect.top;
+                
+                const percentX = (x / rect.width) * 100;
+                const percentY = (y / rect.height) * 100;
+                
+                target.style.transformOrigin = `${percentX}% ${percentY}%`;
+                target.style.transform = 'scale(2)';
+                target.style.zIndex = '100';
+                target.classList.add('zoomed');
+            }
+        }
+        
+        // ==================== 分页模式 ====================
+        function setupPagedMode() {
+            const viewer = document.getElementById('imageViewer');
+            if (!viewer) return;
+            
+            // 分页模式下，点击左右两侧翻页
+            viewer.addEventListener('click', (e) => {
+                if (!isPagedMode) return;
+                
+                // 如果点击的是按钮或链接，不处理
+                if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+                    return;
+                }
+                
+                const width = window.innerWidth;
+                const x = e.clientX;
+                
+                // 点击左侧25%区域：上一页
+                if (x < width * 0.25) {
+                    navigatePage(-1);
+                }
+                // 点击右侧25%区域：下一页
+                else if (x > width * 0.75) {
+                    navigatePage(1);
+                }
+                // 点击中央区域：切换菜单（已在 setupMenuToggle 中处理）
+            });
+            
+            // 支持左右滑动翻页（移动端）
+            let touchStartX = 0;
+            let touchStartY = 0;
+            
+            viewer.addEventListener('touchstart', (e) => {
+                if (!isPagedMode || e.touches.length !== 1) return;
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+            }, { passive: true });
+            
+            viewer.addEventListener('touchend', (e) => {
+                if (!isPagedMode) return;
+                
+                const touchEndX = e.changedTouches[0].clientX;
+                const touchEndY = e.changedTouches[0].clientY;
+                const deltaX = touchStartX - touchEndX;
+                const deltaY = touchStartY - touchEndY;
+                
+                // 水平滑动距离大于垂直滑动距离，且超过50px，才认为是翻页手势
+                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 50) {
+                    if (deltaX > 0) {
+                        // 向左滑动：下一页
+                        navigatePage(1);
+                    } else {
+                        // 向右滑动：上一页
+                        navigatePage(-1);
+                    }
+                }
+            }, { passive: true });
+        }
+        
+        // 切换分页/卷轴模式
+        function togglePagedMode() {
+            const viewer = document.getElementById('imageViewer');
+            const btn = document.getElementById('pagedModeBtn');
+            
+            if (!viewer) return;
+            
+            isPagedMode = !isPagedMode;
+            
+            if (isPagedMode) {
+                viewer.classList.remove('scroll-mode');
+                viewer.classList.add('paged-mode');
+                if (btn) btn.textContent = '📜 卷轴';
+                
+                // 切换到分页模式时，重新渲染图片
+                if (currentImages.length > 0) {
+                    renderAllImages();
+                    // 跳转到当前图片
+                    if (currentIndex >= 0) {
+                        showImage(currentIndex);
+                    }
+                }
+            } else {
+                viewer.classList.remove('paged-mode');
+                viewer.classList.add('scroll-mode');
+                if (btn) btn.textContent = '📄 分页';
+                
+                // 切换到卷轴模式时，重新渲染图片
+                if (currentImages.length > 0) {
+                    renderAllImages();
+                    // 跳转到当前图片
+                    if (currentIndex >= 0) {
+                        showImage(currentIndex);
+                    }
+                }
+            }
+        }
+        
+        // 分页模式下的翻页
+        function navigatePage(direction) {
+            if (!isPagedMode || currentImages.length === 0) return;
+            
+            const newIndex = currentIndex + direction;
+            if (newIndex >= 0 && newIndex < currentImages.length) {
+                showImage(newIndex);
+                
+                // 在分页模式下，滚动到对应图片
+                const viewer = document.getElementById('imageViewer');
+                const targetImg = viewer.querySelector(`img[data-index="${newIndex}"]`);
+                if (targetImg) {
+                    targetImg.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+                }
+            }
+        }
+        
+        // ==================== 进度条处理 ====================
+        function handleSliderChange(value) {
+            const index = parseInt(value) - 1;
+            if (index >= 0 && index < currentImages.length) {
+                showImage(index);
+            }
+        }
+        
         // ==================== 交互：长按跳转与底部上拉跳转 ====================
         function setupImageViewerInteractions() {
             const viewer = document.getElementById('imageViewer');
@@ -2668,6 +3130,9 @@
                         showImage(0);
                         enterMobileReader();
                         
+                        // 默认隐藏菜单
+                        toggleMenus(false);
+                        
                         // ★★★ 新增：恢复进度 ★★★
                         const saved = ProgressMgr.get(folderPath);
                         // 如果有记录，且记录的页码不是第一页
@@ -2743,6 +3208,7 @@
             
             currentIndex = index;
             const imageWrapper = document.getElementById('imageWrapper');
+            const viewer = document.getElementById('imageViewer');
             
             // 如果 DOM 为空（比如刚从根目录进来），先渲染占位符
             if (imageWrapper.children.length === 0) {
@@ -2753,8 +3219,14 @@
             const targetImg = imageWrapper.querySelector(`img[data-index="${index}"]`);
             
             if (targetImg) {
-                // 滚动到该图片
-                targetImg.scrollIntoView({ behavior: 'auto', block: 'start' });
+                // 分页模式和卷轴模式的滚动行为不同
+                if (isPagedMode) {
+                    // 分页模式：平滑滚动到对应图片
+                    targetImg.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'start' });
+                } else {
+                    // 卷轴模式：滚动到该图片
+                    targetImg.scrollIntoView({ behavior: 'auto', block: 'start' });
+                }
                 
                 // 强制立即加载当前图片（不需要等观察器触发，提升响应速度）
                 const realSrc = targetImg.getAttribute('data-src');
@@ -2957,6 +3429,22 @@
             const counter = document.getElementById('imageCounter');
             counter.textContent = `${currentIndex + 1} / ${currentImages.length}`;
             
+            // 更新进度条
+            const slider = document.getElementById('page-slider');
+            const sliderCurrent = document.getElementById('slider-current');
+            const sliderTotal = document.getElementById('slider-total');
+            
+            if (slider && currentImages.length > 0) {
+                slider.max = currentImages.length;
+                slider.value = currentIndex + 1;
+            }
+            if (sliderCurrent) {
+                sliderCurrent.textContent = currentIndex + 1;
+            }
+            if (sliderTotal) {
+                sliderTotal.textContent = currentImages.length;
+            }
+            
             // ★★★ 新增：保存进度 ★★★
             if (currentFolderPath && currentImages.length > 0) {
                 ProgressMgr.save(currentFolderPath, currentIndex, currentImages.length);
@@ -3013,14 +3501,29 @@
             } else {
                 navButtons.classList.remove('hidden');
             }
+            // 显示菜单时，也显示底部菜单
+            if (!sidebar.classList.contains('hidden')) {
+                toggleMenus(true);
+            }
         }
 
-        // 全屏
-        function toggleFullscreen() {
-            if (!document.fullscreenElement) {
-                document.documentElement.requestFullscreen();
-            } else {
-                document.exitFullscreen();
+        // 全屏（保持当前屏幕方向，不强制旋转）
+        async function toggleFullscreen() {
+            const doc = document.documentElement;
+            try {
+                if (!document.fullscreenElement) {
+                    // 请求全屏，保持当前屏幕方向
+                    await doc.requestFullscreen();
+                    
+                    // 注意：不再强制锁定方向，避免强制旋转屏幕
+                    // 如果需要锁定方向，可以使用 'any' 来锁定当前方向
+                    // 或者根据用户偏好设置来决定是否锁定
+                } else {
+                    // 退出全屏
+                    await document.exitFullscreen();
+                }
+            } catch (err) {
+                console.error("全屏切换出错:", err);
             }
         }
 
