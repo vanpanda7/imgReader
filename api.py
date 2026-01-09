@@ -7,6 +7,7 @@ import asyncio
 import threading
 import re
 import yaml
+import time
 from pathlib import Path
 from typing import Optional, List, Dict, Set, Any, Tuple
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +42,8 @@ if _src_path.exists() and str(_src_path) not in sys.path:
     sys.path.insert(0, str(_src_path))
 
 import jmcomic
+from jmcomic.jm_downloader import JmDownloader
+from jmcomic.jm_entity import JmImageDetail
 import config
 
 # ==================== 配置与初始化 ====================
@@ -58,6 +61,49 @@ import os
 cpu_count = os.cpu_count() or 4
 image_executor = ThreadPoolExecutor(max_workers=min(cpu_count, 4), thread_name_prefix="img_worker")
 print(f"✓ 图片处理线程池已创建 (工作线程数: {min(cpu_count, 4)})")
+
+# ==================== 进度管理器 ====================
+
+class ProgressManager:
+    """线程安全的进度管理器，支持原子计数和防抖更新"""
+    def __init__(self, total_count: int):
+        self.total = total_count
+        self.current = 0
+        self._lock = threading.Lock()
+        self.last_update_time = 0
+        self.update_interval = 0.5  # 防抖间隔：0.5秒
+        
+    def increment_and_get(self) -> Tuple[int, int]:
+        """
+        增加计数并返回 (当前数, 百分比)
+        线程安全操作
+        """
+        with self._lock:
+            self.current += 1
+            percent = int((self.current / self.total) * 100) if self.total > 0 else 0
+            return self.current, percent
+
+    def should_update_redis(self) -> bool:
+        """
+        防抖动：限制 Redis 更新频率
+        如果完成了，或者距离上次更新超过指定间隔，才允许写入
+        """
+        with self._lock:
+            now = time.time()
+            # 如果完成了，或者距离上次更新超过间隔时间
+            if self.current >= self.total or (now - self.last_update_time) > self.update_interval:
+                self.last_update_time = now
+                return True
+            return False
+    
+    def get_progress(self) -> Dict[str, Any]:
+        """获取当前进度信息"""
+        with self._lock:
+            return {
+                "current": self.current,
+                "total": self.total,
+                "percentage": int((self.current / self.total) * 100) if self.total > 0 else 0
+            }
 
 # ==================== 核心修改区域 Start ====================
 
@@ -513,6 +559,49 @@ class ConnectionManager:
 
 connection_manager = ConnectionManager()
 
+class ProgressTrackingDownloader(JmDownloader):
+    """自定义下载器，使用原子计数器跟踪进度"""
+    def __init__(self, option, album_id: str, progress_mgr: ProgressManager, download_manager: 'DownloadManager'):
+        super().__init__(option)
+        self.album_id = album_id
+        self.progress_mgr = progress_mgr
+        self.download_manager = download_manager
+    
+    def after_image(self, image: JmImageDetail, img_save_path):
+        """每张图片下载完成后的回调"""
+        # 调用父类方法（用于日志记录等）
+        super().after_image(image, img_save_path)
+        
+        # 原子计数器增加
+        curr, percent = self.progress_mgr.increment_and_get()
+        
+        # 防抖：只在需要时更新 Redis 和推送进度
+        if self.progress_mgr.should_update_redis():
+            progress_info = self.progress_mgr.get_progress()
+            with self.download_manager.progress_lock:
+                self.download_manager.progress_store[self.album_id] = {
+                    "current": progress_info["current"],
+                    "total": progress_info["total"],
+                    "status": "downloading",
+                    "message": f"下载中 {progress_info['current']}/{progress_info['total']}",
+                    "percentage": progress_info["percentage"]
+                }
+            
+            # 异步推送进度更新
+            try:
+                loop = self.download_manager._main_loop
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        connection_manager.broadcast(
+                            self.album_id, 
+                            self.download_manager.progress_store[self.album_id]
+                        ), 
+                        loop
+                    )
+            except Exception:
+                # 静默处理错误，避免影响下载流程
+                pass
+
 class DownloadManager:
     def __init__(self):
         self.progress_store = {}
@@ -522,6 +611,7 @@ class DownloadManager:
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.option_file = APP_CONFIG["option_file"]
         self._option = None
+        self._main_loop = None  # 保存主事件循环引用
 
     def get_option(self):
         if not self._option:
@@ -555,36 +645,79 @@ class DownloadManager:
                     }
                 # 异步推送
                 try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
+                    # 注意：_log_callback 在同步线程中调用，需要使用保存的主事件循环
+                    loop = self._main_loop
+                    if loop and loop.is_running():
                         asyncio.run_coroutine_threadsafe(
                             connection_manager.broadcast(album_id, self.progress_store[album_id]), loop
                         )
-                except: pass
+                except Exception:
+                    # 静默处理错误，避免影响下载流程
+                    pass
 
     def download_sync(self, album_id: str):
-        # 这里的 Hook 依然存在并发覆盖问题，jmcomic 库设计限制
-        # 但在低并发下可接受
-        def hook(topic, msg): self._log_callback(album_id, topic, msg)
-        
-        original_log = jmcomic.JmModuleConfig.EXECUTOR_LOG
-        jmcomic.JmModuleConfig.EXECUTOR_LOG = hook
-        
+        """
+        使用原子计数器和自定义下载器进行下载
+        废弃了基于日志解析的方式，改用 after_image 回调
+        """
         try:
+            # 初始化状态
             with self.progress_lock:
                 self.progress_store[album_id] = {"status": "starting", "message": "初始化..."}
             
-            jmcomic.download_album(album_id, self.get_option())
+            # 获取 album 信息以确定总图片数
+            option = self.get_option()
+            client = option.build_jm_client()
+            album = client.get_album_detail(album_id)
+            total_images = album.page_count  # 总图片数
             
+            # 创建进度管理器
+            progress_mgr = ProgressManager(total_images)
+            
+            # 创建自定义下载器（使用 after_image 回调）
+            downloader = ProgressTrackingDownloader(option, album_id, progress_mgr, self)
+            
+            # 开始下载
+            downloader.download_by_album_detail(album)
+            
+            # 下载完成
             with self.progress_lock:
-                self.progress_store[album_id] = {"status": "completed", "message": "完成", "percentage": 100}
+                self.progress_store[album_id] = {
+                    "status": "completed", 
+                    "message": "完成", 
+                    "percentage": 100,
+                    "current": total_images,
+                    "total": total_images
+                }
+            
+            # 推送最终状态
+            try:
+                loop = self._main_loop
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        connection_manager.broadcast(album_id, self.progress_store[album_id]), 
+                        loop
+                    )
+            except Exception:
+                pass
+            
             return {"success": True}
         except Exception as e:
             with self.progress_lock:
                 self.progress_store[album_id] = {"status": "error", "message": str(e)}
+            
+            # 推送错误状态
+            try:
+                loop = self._main_loop
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(
+                        connection_manager.broadcast(album_id, self.progress_store[album_id]), 
+                        loop
+                    )
+            except Exception:
+                pass
+            
             raise e
-        finally:
-            jmcomic.JmModuleConfig.EXECUTOR_LOG = original_log
 
 download_manager = DownloadManager()
 cache_service = CacheService()
@@ -681,8 +814,9 @@ async def api_list_files(
         if cached: return JSONResponse(cached, headers={"X-Cache": "HIT"})
 
     # 放到线程池执行 IO
-    loop = asyncio.get_event_loop()
     try:
+        # 使用 get_running_loop() 替代已弃用的 get_event_loop()
+        loop = asyncio.get_running_loop()
         data = await loop.run_in_executor(None, file_service.list_files, root_dir, path, sort_by, order, page, page_size)
         res = {"success": True, "path": path, **data}
         
@@ -727,8 +861,9 @@ async def api_thumbnail(
         return Response(cached_data, media_type=cached_mime, headers={"X-Cache": "HIT", "Cache-Control": f"public, max-age={thumbnail_cache_age}"})
 
     try:
-        loop = asyncio.get_event_loop()
         # 2. 重点：使用 image_executor 独立线程池
+        # 对于自定义线程池，仍然需要使用 run_in_executor，但使用 get_running_loop()
+        loop = asyncio.get_running_loop()
         data, mime_type = await loop.run_in_executor(
             image_executor, 
             file_service.generate_thumbnail, 
@@ -751,32 +886,74 @@ async def api_delete(path: str, root_dir: Path = Depends(get_current_root_dir)):
 
 # ==================== JMComic 代理接口 ====================
 
+def clean_album_id(album_id: str) -> str:
+    """
+    清理 album_id，移除不可见字符、零宽字符和空白字符
+    """
+    if not album_id:
+        return album_id
+    
+    # 移除所有空白字符（包括空格、制表符、换行符等）
+    cleaned = ''.join(album_id.split())
+    
+    # 移除零宽字符和其他不可见字符
+    # 零宽字符包括：零宽空格(U+200B)、零宽非断空格(U+FEFF)、零宽断字符(U+200C)、零宽连字符(U+200D)等
+    import unicodedata
+    # 移除所有控制字符（category 以 'C' 开头的字符，但保留换行符等）
+    cleaned = ''.join(char for char in cleaned if not unicodedata.category(char).startswith('C') or char.isalnum())
+    
+    # 只保留数字和字母（jmcomic 的 album_id 通常是纯数字）
+    cleaned = ''.join(char for char in cleaned if char.isalnum())
+    
+    return cleaned
+
 class DownloadReq(BaseModel):
     album_id: str
     option_file: Optional[str] = None
 
 @app.post("/download")
 async def api_download(req: DownloadReq):
-    loop = asyncio.get_event_loop()
     try:
-        await loop.run_in_executor(download_manager.executor, download_manager.download_sync, req.album_id)
+        # 清理 album_id，移除不可见字符
+        cleaned_album_id = clean_album_id(req.album_id)
+        if not cleaned_album_id:
+            raise HTTPException(400, "无效的 album_id")
+        
+        # 保存主事件循环引用，供同步线程中的回调使用
+        download_manager._main_loop = asyncio.get_running_loop()
+        
+        # 使用 get_running_loop() 替代已弃用的 get_event_loop()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(download_manager.executor, download_manager.download_sync, cleaned_album_id)
         return {"success": True, "message": "任务已提交"}
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(500, str(e))
+        # 记录详细错误信息以便调试
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"下载错误: {e}\n{error_detail}")
+        raise HTTPException(500, f"下载失败: {str(e)}")
 
 @app.websocket("/ws/progress/{album_id}")
 async def ws_progress(ws: WebSocket, album_id: str):
-    await connection_manager.connect(ws, album_id)
+    # 清理 album_id，移除不可见字符
+    cleaned_album_id = clean_album_id(album_id)
+    if not cleaned_album_id:
+        await ws.close(code=1008, reason="无效的 album_id")
+        return
+    
+    await connection_manager.connect(ws, cleaned_album_id)
     try:
         # 发送当前状态
         with download_manager.progress_lock:
-            curr = download_manager.progress_store.get(album_id)
+            curr = download_manager.progress_store.get(cleaned_album_id)
         if curr: await ws.send_text(json.dumps({"type":"progress", "progress":curr}))
         
         while True: 
             await ws.receive_text() # 保持连接
     except:
-        connection_manager.disconnect(ws, album_id)
+        connection_manager.disconnect(ws, cleaned_album_id)
 
 # 代理分类与排行 (复用 Client)
 class CategoryReq(BaseModel):
@@ -792,7 +969,8 @@ async def api_category(req: CategoryReq):
         client = jm_client_manager.get_client()
         
         # 重点：将同步的 categories_filter 放入线程池执行
-        loop = asyncio.get_event_loop()
+        # 使用 get_running_loop() 替代已弃用的 get_event_loop()
+        loop = asyncio.get_running_loop()
         page = await loop.run_in_executor(
             None,  # 这里可以用默认线程池，因为它属于 IO 操作
             lambda: client.categories_filter(req.page, req.time, req.category, req.order_by)
